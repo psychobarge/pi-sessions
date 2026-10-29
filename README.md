@@ -20,6 +20,8 @@ specified in [SPECS.md](SPECS.md); changes from ccsessions are listed in
   session's working directory; `c` copies the command to the clipboard (OSC 52)
 - **Archive & delete** — move sessions out of `pi --resume` (reversibly) or
   delete them for good, per session or per project, with confirmation dialogs
+- **Resizable panes** — drag the bars between panes with the mouse; sizes
+  are remembered per layout across runs (`~/.config/pi-sessions/settings.json`)
 - **Export** — Markdown with YAML front matter (ready for Quarto/Pandoc) or the
   raw JSONL, never overwriting an existing file
 - **Live document** — `l` keeps `_session_<id>.md` in sync with a running
