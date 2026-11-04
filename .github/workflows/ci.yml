@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# a newer push supersedes a pending run on the same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
