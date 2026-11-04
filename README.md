@@ -38,6 +38,14 @@ specified in [SPECS.md](SPECS.md); changes from ccsessions are listed in
 ## Installation
 
 ```bash
+pipx install pi-sessions-tui        # or: uv tool install pi-sessions-tui
+```
+
+Both install the `pisessions` command.
+
+Or from a clone:
+
+```bash
 git clone https://github.com/psychobarge/pi-sessions
 pip install -e pi-sessions
 ```
