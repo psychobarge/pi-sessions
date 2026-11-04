@@ -33,6 +33,12 @@ ccsessions is kept in this repository.
 ### Added
 - Cost (USD, as recorded by pi) in the details pane and Markdown export.
 - Model, fork origin (⑂) and branch count for each session.
+- Resizable panes: drag the bars between panes; sizes are remembered per
+  layout (wide / narrow), double-click a bar to reset it, "Reset layout" in the
+  command palette. From ccsessions
+  [PR #3](https://github.com/miskiewiczm/ccsessions/pull/3), not merged there yet.
+- The focused pane's border uses the accent colour. From ccsessions
+  [PR #4](https://github.com/miskiewiczm/ccsessions/pull/4), not merged there yet.
 
 ### Removed
 - Claude Code specifics: `sessions-index.json`, sessions whose file lives on
