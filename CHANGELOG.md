@@ -35,10 +35,8 @@ ccsessions is kept in this repository.
 - Model, fork origin (⑂) and branch count for each session.
 - Resizable panes: drag the bars between panes; sizes are remembered per
   layout (wide / narrow), double-click a bar to reset it, "Reset layout" in the
-  command palette. From ccsessions
-  [PR #3](https://github.com/miskiewiczm/ccsessions/pull/3), not merged there yet.
-- The focused pane's border uses the accent colour. From ccsessions
-  [PR #4](https://github.com/miskiewiczm/ccsessions/pull/4), not merged there yet.
+  command palette.
+- The focused pane's border uses the accent colour.
 
 ### Removed
 - Claude Code specifics: `sessions-index.json`, sessions whose file lives on
