@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ccsessions.core.models import Session
-from ccsessions.core.watch import (
+from pi_sessions.core.models import Session
+from pi_sessions.core.watch import (
     LiveDoc,
     WatchError,
     gitignore_hint,
@@ -17,13 +17,9 @@ from ccsessions.core.watch import (
 
 
 def _event(role: str, text: str) -> str:
-    if role == "user":
-        obj = {"type": "user", "message": {"role": "user", "content": text}}
-    else:
-        obj = {
-            "type": "assistant",
-            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
-        }
+    # no id: a legacy-style entry, so the live window follows file order
+    content = [{"type": "text", "text": text}]
+    obj = {"type": "message", "message": {"role": role, "content": content}}
     return json.dumps(obj) + "\n"
 
 
@@ -145,7 +141,7 @@ def test_gitignore_hint_only_for_unprepared_repos(session, tmp_path):
 
 def test_live_dir_override_redirects_documents(session, tmp_path, monkeypatch):
     elsewhere = tmp_path / "live" / "docs"
-    monkeypatch.setenv("CCSESSIONS_LIVE_DIR", str(elsewhere))
+    monkeypatch.setenv("PI_SESSIONS_LIVE_DIR", str(elsewhere))
     doc = LiveDoc(session)  # the directory is created on demand
     doc.poll(session, force=True)
     assert doc.out_path == elsewhere / "_session_abc-123.md"

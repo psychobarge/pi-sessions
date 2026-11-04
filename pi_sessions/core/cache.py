@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from .models import TokenStats
 
-DEFAULT_CACHE_PATH = Path.home() / ".cache" / "ccsessions" / "token-stats.json"
+DEFAULT_CACHE_PATH = Path.home() / ".cache" / "pi-sessions" / "stats.json"
 
 
 class TokenCache:
-    """Per-JSONL-file token stats cache.
+    """Per-session-file stats cache — pi keeps no session index, so this is it.
 
     An entry stays valid as long as the file's (st_mtime_ns, st_size) are
     unchanged — large finished sessions are read from disk only once.
@@ -44,14 +45,10 @@ class TokenCache:
         if entry.get("mtime_ns") != stat.st_mtime_ns or entry.get("size") != stat.st_size:
             return None
         try:
+            # cast to each field's default type; a missing key (entry written
+            # by an older version) raises KeyError and forces a re-read
             return TokenStats(
-                input=int(entry["input"]),
-                output=int(entry["output"]),
-                cache_read=int(entry["cache_read"]),
-                cache_write=int(entry["cache_write"]),
-                messages=int(entry["messages"]),
-                # KeyError on entries cached before this field existed forces a re-read
-                custom_title=str(entry["custom_title"]),
+                **{f.name: type(f.default)(entry[f.name]) for f in fields(TokenStats)}
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -60,12 +57,7 @@ class TokenCache:
         self._entries[str(jsonl)] = {
             "mtime_ns": stat.st_mtime_ns,
             "size": stat.st_size,
-            "input": stats.input,
-            "output": stats.output,
-            "cache_read": stats.cache_read,
-            "cache_write": stats.cache_write,
-            "messages": stats.messages,
-            "custom_title": stats.custom_title,
+            **asdict(stats),
         }
         self._dirty = True
 

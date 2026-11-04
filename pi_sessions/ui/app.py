@@ -19,6 +19,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static
+from textual.widgets._footer import FooterKey
 
 from ..core.aliases import ProjectAliases
 from ..core.cache import TokenCache
@@ -42,22 +43,64 @@ from ..core.watch import LiveDoc, WatchError, gitignore_hint, has_live_doc, live
 
 # explicit pygments style for fenced code blocks (empty = follow the app
 # theme); any name from `pygments.styles.get_all_styles()` works
-CODE_THEME_OVERRIDE = os.environ.get("CCSESSIONS_CODE_THEME", "")
+CODE_THEME_OVERRIDE = os.environ.get("PI_SESSIONS_CODE_THEME", "")
 
-# explicit Textual theme (empty = last theme saved from Ctrl+P, or ansi-dark)
-APP_THEME_OVERRIDE = os.environ.get("CCSESSIONS_THEME", "")
+# explicit Textual theme (empty = last theme saved from the palette (p), or ansi-dark)
+APP_THEME_OVERRIDE = os.environ.get("PI_SESSIONS_THEME", "")
+
+
+_default_footer_key_render = FooterKey.render
+
+
+def _footer_key_render(self: FooterKey) -> Text:
+    """Lowercase footer label with its key letter coloured, keys joined by
+    " - " (quit - resume - ...).
+
+    Keys absent from their label (/, ctrl+r ...) stay in
+    front of it, as Textual draws them.
+    """
+    if not self.description:
+        return _default_footer_key_render(self)
+    key = self.key_display
+    key_style = self.get_component_rich_style("footer-key--key")
+    description_style = self.get_component_rich_style("footer-key--description")
+    padding = self.get_component_styles("footer-key--description").padding
+    description = self.description.lower()
+    label = Text(
+        " " * padding.left + description + " " * padding.right,
+        style=description_style,
+    )
+    index = description.find(key.lower()) if len(key) == 1 else -1
+    if index >= 0:
+        start = padding.left + index
+        label.stylize(key_style, start, start + 1)
+    else:
+        label = Text.assemble((key + " ", key_style), label)
+    if (
+        self.parent is not None
+        and self.parent.children.index(self) > 0
+        and not self.has_class("-command-palette")  # docked apart, on the right
+    ):
+        label = Text.assemble(("- ", description_style), label)
+    label.stylize_before(self.rich_style)
+    return label
+
+
+# Footer builds FooterKey itself with no hook, so the render is
+# patched; recheck when upgrading Textual (written against 8.2.8)
+FooterKey.render = _footer_key_render
 
 
 def _eye_glyphs() -> tuple[str, str]:
     """Glyphs for the live-document column: (following, file only).
 
     Plain Unicode by default so the app looks right in any terminal;
-    CCSESSIONS_NERD_FONT=1 switches to the Nerd Fonts eye, and either glyph
+    PI_SESSIONS_NERD_FONT=1 switches to the Nerd Fonts eye, and either glyph
     can be overridden outright.
     """
-    nerd = os.environ.get("CCSESSIONS_NERD_FONT", "").lower() not in ("", "0", "false", "no")
-    on = os.environ.get("CCSESSIONS_EYE") or ("\U000f06d0" if nerd else "◉")
-    off = os.environ.get("CCSESSIONS_EYE_OFF") or ("\U000f06d0" if nerd else "◌")
+    nerd = os.environ.get("PI_SESSIONS_NERD_FONT", "").lower() not in ("", "0", "false", "no")
+    on = os.environ.get("PI_SESSIONS_EYE") or ("\U000f06d0" if nerd else "◉")
+    off = os.environ.get("PI_SESSIONS_EYE_OFF") or ("\U000f06d0" if nerd else "◌")
     return on, off
 
 
@@ -67,7 +110,7 @@ EYE_ON, EYE_OFF = _eye_glyphs()
 def _auto_refresh_seconds() -> float:
     """Rescan interval in seconds; 0 disables auto-refresh."""
     try:
-        value = float(os.environ.get("CCSESSIONS_REFRESH_SECONDS", "10"))
+        value = float(os.environ.get("PI_SESSIONS_REFRESH_SECONDS", "10"))
     except ValueError:
         return 10.0
     return max(0.0, value)
@@ -149,6 +192,12 @@ def short_path(path: str) -> str:
     if path.startswith(home + "/"):
         return "~/" + path[len(home) + 1 :]
     return path
+
+
+def _resume_request(session: Session) -> ResumeRequest:
+    return ResumeRequest(
+        session_id=session.session_id, cwd=session.project_path, file=str(session.jsonl_path)
+    )
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -340,8 +389,10 @@ class ExportScreen(ModalScreen[tuple[str, str] | None]):
         self.dismiss(None)
 
 
-class CCSessionsApp(App):
+class PiSessionsApp(App):
     """Four panes (projects / sessions / details / conversation) + resume."""
+
+    COMMAND_PALETTE_BINDING = "p"
 
     # terminal width at which the layout switches to the "wide" variant
     WIDE_BREAKPOINT = 140
@@ -434,7 +485,7 @@ class CCSessionsApp(App):
         height: 1;
         background: $boost;
         color: $text-muted;
-        padding: 0 1;
+        padding: 0 1 0 0;  /* left edge in line with the footer keys */
     }
     """
 
@@ -447,9 +498,9 @@ class CCSessionsApp(App):
         Binding("d", "delete", "Delete"),
         Binding("n", "rename", "Rename"),
         Binding("e", "export", "Export"),
-        Binding("w", "watch", "Live doc"),
+        Binding("l", "watch", "Live doc"),
         Binding("/", "filter", "Filter"),
-        Binding("ctrl+r", "refresh", "Refresh"),
+        Binding("ctrl+r", "refresh", "Refresh", show=False),
         Binding("tab", "focus_next", "Next pane", show=False),
         Binding("shift+tab", "focus_previous", "Previous pane", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -502,7 +553,7 @@ class CCSessionsApp(App):
         self.screen.set_class(not wide, "-narrow")
 
     def on_mount(self) -> None:
-        self.title = "Claude Code Sessions"
+        self.title = "Pi Sessions"
         self.sub_title = ""
         # precedence: env var > theme saved from a previous run > default
         requested = APP_THEME_OVERRIDE or load_settings().get("theme") or "ansi-dark"
@@ -527,7 +578,7 @@ class CCSessionsApp(App):
             self.set_interval(interval, self._tick_refresh)
         # live documents need a tighter loop than the session list
         self.set_interval(2.0, self._tick_watches)
-        # re-render the details pane when the theme changes (Ctrl+P)
+        # re-render the details pane when the theme changes (palette, p)
         self.watch(self, "theme", self._on_theme_changed, init=False)
 
     def _apply_markdown_styles(self) -> None:
@@ -552,7 +603,7 @@ class CCSessionsApp(App):
         self._md_styles_pushed = True
 
     def _on_theme_changed(self) -> None:
-        # remember the choice (Ctrl+P) for the next run
+        # remember the choice (palette, p) for the next run
         settings = load_settings()
         settings["theme"] = self.theme
         save_settings(settings)
@@ -585,8 +636,10 @@ class CCSessionsApp(App):
     def _scan(self) -> None:
         """Disk scan off the UI thread — the interface stays responsive."""
         started = time.monotonic()
-        projects = discover_projects(cache=self._cache)
+        seen: set[str] = set()
+        projects = discover_projects(cache=self._cache, seen_files=seen)
         self._aliases.apply(projects)
+        self._cache.prune(seen)
         self._cache.save()
         elapsed = time.monotonic() - started
         self.call_from_thread(self._apply_projects, projects, elapsed)
@@ -596,24 +649,18 @@ class CCSessionsApp(App):
         self._refresh_projects_table()
         all_sessions = [s for p in self.projects for s in p.sessions]
         live_count = sum(1 for s in all_sessions if s.is_live)
-        active = sum(1 for s in all_sessions if not (s.is_archived or s.is_missing))
+        active = sum(1 for s in all_sessions if not s.is_archived)
         archived = sum(1 for s in all_sessions if s.is_archived)
-        missing = sum(1 for s in all_sessions if s.is_missing)
-        extras = []
-        if archived:
-            extras.append(f"+{archived} archived")
-        if missing:
-            extras.append(f"+{missing} no file")
+        extras = [f"+{archived} archived"] if archived else []
         proj_archived = sum(1 for p in self.projects if p.is_archived)
         proj_label = f"{len(self.projects) - proj_archived} projects" + (
             f" (+{proj_archived} archived)" if proj_archived else ""
         )
         self._set_status(
-            f"{proj_label}  ·  {active} sessions"
+            f"{proj_label} - {active} sessions"
             + (f" ({', '.join(extras)})" if extras else "")
-            + f"  ·  {live_count} live"
-            + f"  ·  scan {elapsed:.1f}s"
-            + "  ·  r=resume  c=copy  a=archive  d=delete  q=quit"
+            + f" - {live_count} active"
+            + f" - scan {elapsed:.1f}s"
         )
 
     def _muted_hex(self) -> str | None:
@@ -683,8 +730,7 @@ class CCSessionsApp(App):
         table = self.query_one("#projects-table", DataTable)
         pal = self._palette()
         self._update_filter_titles()
-        # encoded_dir, not project_path: a Claude worktree's sessions carry the
-        # main checkout's cwd, so two projects can share the same path
+        # encoded_dir, not project_path: it is what identifies a project row
         prev_dir = (
             self._vprojects[table.cursor_row].encoded_dir
             if 0 <= table.cursor_row < len(self._vprojects)
@@ -694,8 +740,8 @@ class CCSessionsApp(App):
         table.clear()
         self._vprojects = self._visible_projects()
         for p in self._vprojects:
-            active = [s for s in p.sessions if not (s.is_archived or s.is_missing)]
-            archived = [s for s in p.sessions if s.is_archived or s.is_missing]
+            active = [s for s in p.sessions if not s.is_archived]
+            archived = [s for s in p.sessions if s.is_archived]
             all_archived = not active
             if p.is_archived:
                 live = Text("▪", style=pal["error"])
@@ -772,22 +818,20 @@ class CCSessionsApp(App):
         table.clear()
         self._vsessions = sessions
         for s in sessions:
-            if s.is_missing:
-                marker = Text("✕", style=pal["muted"])
-            elif s.is_archived:
+            if s.is_archived:
                 marker = Text("▪", style=pal["error"])
             elif s.is_live:
                 marker = Text("●", style=pal["success"])
+            elif s.parent_session:
+                marker = Text("⑂", style=pal["muted"])
             else:
                 marker = Text(" ")
-            inactive = s.is_missing or s.is_archived
+            inactive = s.is_archived
             desc_raw = s.display_title.replace("\n", " ").strip() or s.session_id
             if len(desc_raw) > 80:
                 desc_raw = desc_raw[:77] + "..."
             if inactive:
                 desc_style = pal["muted"]
-            elif s.is_sidechain:
-                desc_style = f"{pal['muted']} italic"
             elif s.is_live:
                 desc_style = f"bold {pal['text']}"
             else:
@@ -796,8 +840,7 @@ class CCSessionsApp(App):
             count_style = pal["muted"] if inactive else pal["warning"]
             count = Text(str(s.message_count), style=count_style, justify="right")
             tok_style = pal["muted"] if inactive else pal["secondary"]
-            tok_text = "-" if s.is_missing else fmt_tokens(s.tokens)
-            tokens = Text(tok_text, style=tok_style, justify="right")
+            tokens = Text(fmt_tokens(s.tokens), style=tok_style, justify="right")
             modified = Text(fmt_date(s.modified), style=pal["muted"])
             table.add_row(marker, self._watch_eye(s, pal), desc, count, tokens, modified)
         if prev_sid is not None:
@@ -847,18 +890,19 @@ class CCSessionsApp(App):
         c_text = th.foreground or "ansi_default"
         c_muted = self._muted_hex() or "ansi_bright_black"
 
-        if session.is_missing:
-            state = f"[{c_muted}]✕ JSONL file not on this machine — cannot resume[/]"
-        elif session.is_archived:
+        if session.is_archived:
             state = f"[{c_error}]▪ archived (a = restore)[/]"
         elif session.is_live:
-            state = f"[{c_success}]● live[/]"
+            state = f"[{c_success}]● active (recently modified)[/]"
         else:
             state = f"[{c_warning}]○ inactive[/]"
-        sidechain = f"  [{c_warning}](sidechain)[/]" if session.is_sidechain else ""
-        branch = (
-            f"  [{c_secondary}]⎇ {escape(session.git_branch)}[/]"
-            if session.git_branch
+        model = f"  [{c_secondary}]{escape(session.model)}[/]" if session.model else ""
+        branches = (
+            f"  [{c_warning}]⑂ {session.branches} branches[/]" if session.branches > 1 else ""
+        )
+        fork = (
+            f"[{c_muted}]⑂ fork of {escape(Path(session.parent_session).name)}[/]\n"
+            if session.parent_session
             else ""
         )
 
@@ -874,12 +918,10 @@ class CCSessionsApp(App):
             first_prompt = first_prompt[:597] + "..."
 
         cwd_exists = bool(session.project_path) and Path(session.project_path).is_dir()
-        if session.is_archived or session.is_missing:
+        if session.is_archived:
             resume_line = ""
         else:
-            cmd = build_resume_command(
-                ResumeRequest(session_id=session.session_id, cwd=session.project_path)
-            )
+            cmd = build_resume_command(_resume_request(session))
             warn = (
                 f"\n[{c_warning}]⚠ project directory no longer exists — no cd[/]"
                 if not cwd_exists
@@ -899,7 +941,7 @@ class CCSessionsApp(App):
                 "stale": f"[{c_muted}]◌ file only — not updating[/]",
             }[watch_state]
             watch_line = (
-                f"\n[bold]Live document[/bold] [{c_muted}](w = toggle)[/]\n"
+                f"\n[bold]Live document[/bold] [{c_muted}](l = toggle)[/]\n"
                 f"{label}\n"
                 f"[{c_primary}]{escape(str(live_doc_path(session)))}[/]\n"
             )
@@ -909,7 +951,7 @@ class CCSessionsApp(App):
         t = session.tokens
         text = (
             f"{title_line}"
-            f"{state}{sidechain}{branch}\n\n"
+            f"{state}{model}{branches}\n{fork}\n"
             f"[{c_muted}]ID:[/]  [{c_text}]{session.session_id}[/]\n"
             f"[{c_muted}]CWD:[/] [{c_text}]{escape(short_path(session.project_path))}[/]"
             f"{'' if cwd_exists else f' [{c_warning}](does not exist)[/]'}\n"
@@ -923,6 +965,7 @@ class CCSessionsApp(App):
             f"  [{c_primary}]cache read:[/]  [{c_text}]{t.cache_read:>12,}[/]\n"
             f"  [{c_accent}]cache write:[/] [{c_text}]{t.cache_write:>12,}[/]\n"
             f"  [bold]Σ total:[/]     [bold {c_warning}]{t.total:>12,}[/]\n"
+            f"  [bold]$ cost:[/]      [bold {c_warning}]{t.cost:>12.4f}[/]\n"
             f"{resume_line}"
             f"{watch_line}"
             f"\n"
@@ -936,14 +979,6 @@ class CCSessionsApp(App):
         scroll = self.query_one("#conv-scroll", VerticalScroll)
         if session is None:
             widget.update(Text("No session selected", style="dim"))
-            return
-        if session.is_missing:
-            widget.update(
-                Text(
-                    "✕ JSONL file not on this machine — conversation preview unavailable",
-                    style=self._palette()["muted"],
-                )
-            )
             return
         entries = read_conversation_tail(session.jsonl_path)
         if not entries:
@@ -967,6 +1002,9 @@ class CCSessionsApp(App):
             if role == "command":
                 parts.append(Text(f"  ⌘ {text}", style=f"bold {pal['muted']}"))
                 continue
+            if role == "marker":
+                parts.append(Text(f"  {text}", style=f"italic {pal['accent']}"))
+                continue
             if role == "command-output":
                 if len(text) > 400:
                     text = text[:397] + "..."
@@ -986,7 +1024,7 @@ class CCSessionsApp(App):
                     self.theme or "", self.current_theme.dark, CODE_THEME_OVERRIDE
                 )
                 parts.append(
-                    Text.assemble(("▌ Claude", f"bold {pal['success']}"), (stamp, pal["success"]))
+                    Text.assemble(("▌ Pi", f"bold {pal['success']}"), (stamp, pal["success"]))
                 )
                 parts.append(Padding(Markdown(text, code_theme=code_theme), (0, 0, 1, 2)))
         widget.update(Group(*parts))
@@ -1048,10 +1086,6 @@ class CCSessionsApp(App):
         s = self._current_session()
         if s is None:
             return None
-        if s.is_missing:
-            self._set_status("Cannot resume — JSONL file not on this machine")
-            self.bell()
-            return None
         if s.is_archived:
             p = self._current_project()
             if p is not None and p.is_archived:
@@ -1067,13 +1101,13 @@ class CCSessionsApp(App):
     def action_resume(self) -> None:
         s = self._selected_session()
         if s is not None:
-            self.exit(ResumeRequest(session_id=s.session_id, cwd=s.project_path))
+            self.exit(_resume_request(s))
 
     def action_copy_resume(self) -> None:
         s = self._selected_session()
         if s is None:
             return
-        cmd = build_resume_command(ResumeRequest(session_id=s.session_id, cwd=s.project_path))
+        cmd = build_resume_command(_resume_request(s))
         self.copy_to_clipboard(cmd)
         self._set_status(f"Copied to clipboard: {cmd}")
 
@@ -1133,10 +1167,6 @@ class CCSessionsApp(App):
             self._set_status(f"Live doc stopped (file kept): {path}")
             self._refresh_watch_ui()
             return
-        if s.is_missing:
-            self._set_status("Cannot follow — transcript not on this machine")
-            self.bell()
-            return
         try:
             doc = LiveDoc(s)
             doc.poll(s, force=True)
@@ -1146,7 +1176,7 @@ class CCSessionsApp(App):
             return
         self._watches[s.session_id] = doc
         hint = gitignore_hint(s)
-        self._set_status(f"Live doc → {doc.out_path}" + (f"  ·  {hint}" if hint else ""))
+        self._set_status(f"Live doc → {doc.out_path}" + (f" - {hint}" if hint else ""))
         self._refresh_watch_ui()
 
     def _refresh_watch_ui(self) -> None:
@@ -1172,10 +1202,6 @@ class CCSessionsApp(App):
     def action_export(self) -> None:
         s = self._current_session()
         if s is None:
-            return
-        if s.is_missing:
-            self._set_status("Cannot export — transcript not on this machine")
-            self.bell()
             return
 
         def on_export(result: tuple[str, str] | None) -> None:
@@ -1259,10 +1285,6 @@ class CCSessionsApp(App):
         s = self._current_session()
         if s is None:
             return
-        if s.is_missing:
-            self._set_status("File not on this machine — nothing to archive")
-            self.bell()
-            return
         if s.is_live:
             self._set_status("Session is live — not archiving")
             self.bell()
@@ -1321,7 +1343,7 @@ class CCSessionsApp(App):
             msg = (
                 f"PERMANENTLY delete project “{p.display_name}”\n"
                 f"({len(p.sessions)} sessions, {fmt_tokens(p.total_tokens)} tokens)?\n\n"
-                f"If ~/.claude is synced between machines,\n"
+                f"If the sessions directory is synced between machines,\n"
                 f"the deletion will propagate to all of them."
             )
 
@@ -1347,15 +1369,10 @@ class CCSessionsApp(App):
             self._set_status("Session is live — not deleting")
             self.bell()
             return
-        what = (
-            "the index entry (the file lives on another machine — it stays there)"
-            if s.is_missing
-            else "the transcript and the index entry"
-        )
         msg = (
             f"Delete session “{s.display_title[:50]}”?\n"
-            f"This will remove {what}.\n\n"
-            f"If ~/.claude is synced between machines, the change propagates."
+            f"This will remove its session file.\n\n"
+            f"If the sessions directory is synced between machines, the change propagates."
         )
 
         def on_session_confirm(ok: bool | None) -> None:

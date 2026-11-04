@@ -3,11 +3,11 @@ from __future__ import annotations
 import sys
 
 from .core.resume import ResumeError, ResumeRequest, execute_resume
-from .ui.app import CCSessionsApp
+from .ui.app import PiSessionsApp
 
 
 def main() -> int:
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     result = app.run()
     if isinstance(result, ResumeRequest):
         try:

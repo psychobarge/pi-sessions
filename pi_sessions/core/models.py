@@ -7,26 +7,40 @@ from typing import NamedTuple
 
 
 class Entry(NamedTuple):
-    """One conversation entry parsed from a transcript line.
+    """One conversation entry parsed from a pi session line.
 
-    `ts` comes from the record's own `timestamp` field, which Claude Code
-    writes on every line — so it is available for every past session, with
-    no local configuration involved.
+    `ts` comes from the entry's own ISO `timestamp`, which pi writes on every
+    entry of the session tree.
     """
 
-    role: str  # user | assistant | tool | command | command-output
+    role: str  # user | assistant | tool | command | command-output | marker
     text: str
-    ts: datetime | None = None  # aware, UTC; None when the record carries none
+    ts: datetime | None = None  # aware, UTC; None when the entry carries none
 
 
 @dataclass
 class TokenStats:
+    """Everything read from one full pass over a session file.
+
+    pi keeps no session index, so this doubles as the session's metadata and
+    is what the cache stores. Every field has a primitive default: the cache
+    rebuilds instances by casting stored values to the default's type.
+    """
+
     input: int = 0
     output: int = 0
     cache_read: int = 0
     cache_write: int = 0
-    messages: int = 0  # user/assistant message count computed from the JSONL
-    custom_title: str = ""  # last name set with /rename, read from the JSONL
+    cost: float = 0.0  # USD, as recorded by pi
+    messages: int = 0  # user/assistant messages, all branches
+    name: str = ""  # last session_info name (/name, --name)
+    first_prompt: str = ""
+    cwd: str = ""
+    created: str = ""  # ISO timestamp of the session header
+    session_id: str = ""
+    model: str = ""  # provider/model, last seen
+    parent_session: str = ""  # file this session was forked/cloned from
+    branches: int = 0  # leaves of the entry tree
 
     @property
     def total(self) -> int:
@@ -37,6 +51,7 @@ class TokenStats:
         self.output += other.output
         self.cache_read += other.cache_read
         self.cache_write += other.cache_write
+        self.cost += other.cost
         self.messages += other.messages
         return self
 
@@ -51,11 +66,11 @@ class Session:
     message_count: int = 0
     created: datetime | None = None
     modified: datetime | None = None
-    git_branch: str = ""
-    is_sidechain: bool = False
-    is_live: bool = False
+    model: str = ""
+    parent_session: str = ""
+    branches: int = 0
+    is_live: bool = False  # modified recently — pi keeps no live-session registry
     is_archived: bool = False  # .jsonl moved into the archived/ subdirectory
-    is_missing: bool = False  # index entry exists but the file does not (e.g. another machine)
     tokens: TokenStats = field(default_factory=TokenStats)
 
     @property
@@ -68,29 +83,12 @@ class Project:
     project_path: str
     encoded_dir: Path
     sessions: list[Session] = field(default_factory=list)
-    is_archived: bool = False  # directory lives in ~/.claude/projects-archive/
+    is_archived: bool = False  # directory lives in the sessions archive
     alias: str = ""  # user-defined display name (see core.aliases)
 
     @property
-    def worktree(self) -> str:
-        """Name of the Claude worktree this directory holds, empty for a normal project.
-
-        Claude Code keeps worktrees under `<repo>/.claude-worktrees/<name>`,
-        which encodes to a directory named `…-repo--claude-worktrees-<name>`.
-        The sessions inside report the main checkout's cwd, so the directory
-        name is the only place the worktree is visible at all.
-        """
-        _, sep, name = self.encoded_dir.name.partition("--claude-worktrees-")
-        return name if sep else ""
-
-    @property
     def default_name(self) -> str:
-        name = Path(self.project_path).name or self.project_path
-        # a worktree shares the main checkout's path: without this the two rows
-        # are spelled identically and there is no telling them apart
-        if self.worktree and self.worktree != name:
-            return f"{name} ⎇ {self.worktree}"
-        return name
+        return Path(self.project_path).name or self.project_path
 
     @property
     def display_name(self) -> str:

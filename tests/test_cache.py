@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 
-from ccsessions.core.cache import TokenCache
-from ccsessions.core.parser import get_token_stats
+from pi_sessions.core.cache import TokenCache
+from pi_sessions.core.parser import get_token_stats
 
 from conftest import write_transcript
 

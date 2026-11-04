@@ -1,14 +1,33 @@
 from __future__ import annotations
 
-import json
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from .models import Project, Session
 
 ARCHIVE_SUBDIR = "archived"
-PROJECTS_DIR = Path.home() / ".claude" / "projects"
-PROJECTS_ARCHIVE_DIR = Path.home() / ".claude" / "projects-archive"
+
+
+def sessions_root() -> Path:
+    """Where pi keeps its sessions, resolved the way pi does.
+
+    PI_SESSIONS_ROOT (ours) wins, for a root pi itself cannot tell us about
+    — e.g. a host directory mounted into a pi container.
+    """
+    for var in ("PI_SESSIONS_ROOT", "PI_CODING_AGENT_SESSION_DIR"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return Path(value).expanduser()
+    agent_dir = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    base = Path(agent_dir).expanduser() if agent_dir else Path.home() / ".pi" / "agent"
+    return base / "sessions"
+
+
+SESSIONS_DIR = sessions_root()
+# next to the sessions root: ~/.pi/agent/sessions-archive by default
+SESSIONS_ARCHIVE_DIR = SESSIONS_DIR.parent / "sessions-archive"
 
 
 class ManageError(RuntimeError):
@@ -16,10 +35,11 @@ class ManageError(RuntimeError):
 
 
 def archive_session(session: Session) -> Path:
-    """Move the .jsonl into the archived/ subdirectory — it disappears from
-    `claude --resume` but stays on disk and can be restored."""
+    """Move the .jsonl into the archived/ subdirectory — pi lists only the
+    files directly in a project directory, so it disappears from
+    `pi --resume` but stays on disk and can be restored."""
     if not session.jsonl_path.is_file():
-        raise ManageError("JSONL file not on this machine")
+        raise ManageError("session file not found")
     dest_dir = session.jsonl_path.parent / ARCHIVE_SUBDIR
     try:
         dest_dir.mkdir(exist_ok=True)
@@ -44,46 +64,32 @@ def restore_session(session: Session) -> Path:
     return dest
 
 
-def _remove_index_entry(proj_dir: Path, session_id: str) -> None:
-    index_path = proj_dir / "sessions-index.json"
-    if not index_path.is_file():
-        return
-    try:
-        data = json.loads(index_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    entries = data.get("entries")
-    if not isinstance(entries, list):
-        return
-    kept = [e for e in entries if not (isinstance(e, dict) and e.get("sessionId") == session_id)]
-    if len(kept) != len(entries):
-        data["entries"] = kept
-        try:
-            index_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+def _use_trash() -> bool:
+    flag = os.environ.get("PI_SESSIONS_TRASH", "").lower() not in ("", "0", "false", "no")
+    return flag and shutil.which("trash") is not None
 
 
 def delete_session(session: Session) -> None:
-    """Delete the transcript file (if present) and its sessions-index.json entry."""
+    """Delete the session file — through `trash` when PI_SESSIONS_TRASH is set,
+    as pi's own /resume does."""
+    if not session.jsonl_path.is_file():
+        return
     try:
-        if session.jsonl_path.is_file():
+        if _use_trash():
+            subprocess.run(["trash", str(session.jsonl_path)], check=True, capture_output=True)
+        else:
             session.jsonl_path.unlink()
-    except OSError as e:
+    except (OSError, subprocess.CalledProcessError) as e:
         raise ManageError(str(e)) from e
-    proj_dir = session.jsonl_path.parent
-    if proj_dir.name == ARCHIVE_SUBDIR:
-        proj_dir = proj_dir.parent
-    _remove_index_entry(proj_dir, session.session_id)
 
 
 def archive_project(project: Project) -> Path:
-    """Move the whole project directory into ~/.claude/projects-archive/."""
+    """Move the whole project directory into the sessions archive."""
     try:
-        PROJECTS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        SESSIONS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         raise ManageError(str(e)) from e
-    dest = PROJECTS_ARCHIVE_DIR / project.encoded_dir.name
+    dest = SESSIONS_ARCHIVE_DIR / project.encoded_dir.name
     if dest.exists():
         raise ManageError(f"archive already contains directory {dest.name}")
     try:
@@ -94,12 +100,12 @@ def archive_project(project: Project) -> Path:
 
 
 def restore_project(project: Project) -> Path:
-    """Move an archived project directory back into ~/.claude/projects/."""
+    """Move an archived project directory back into the sessions root."""
     if not project.encoded_dir.is_dir():
         raise ManageError("project directory not found")
-    dest = PROJECTS_DIR / project.encoded_dir.name
+    dest = SESSIONS_DIR / project.encoded_dir.name
     if dest.exists():
-        raise ManageError(f"projects directory already contains {dest.name}")
+        raise ManageError(f"sessions directory already contains {dest.name}")
     try:
         shutil.move(str(project.encoded_dir), str(dest))
     except OSError as e:
@@ -108,7 +114,7 @@ def restore_project(project: Project) -> Path:
 
 
 def delete_project(project: Project) -> None:
-    """Permanently delete the whole project directory from ~/.claude/projects/."""
+    """Permanently delete the whole project directory."""
     try:
         shutil.rmtree(project.encoded_dir)
     except OSError as e:

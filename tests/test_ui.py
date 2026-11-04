@@ -4,11 +4,11 @@ import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
-import ccsessions.ui.app as appmod
-from ccsessions.core.models import Project, Session
+import pi_sessions.ui.app as appmod
+from pi_sessions.core.models import Project, Session
 from textual.widgets import Static
 
-from ccsessions.ui.app import CCSessionsApp
+from pi_sessions.ui.app import PiSessionsApp
 
 
 def _fake_projects() -> list[Project]:
@@ -34,7 +34,7 @@ def _fake_projects() -> list[Project]:
 
 
 async def _exercise_filters() -> None:
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -96,12 +96,12 @@ async def _exercise_export(tmp_path: Path) -> None:
     # give the first session a real transcript so the export has content
     transcript = tmp_path / "s1.jsonl"
     transcript.write_text(
-        json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}}) + "\n",
+        json.dumps({"type": "message", "message": {"role": "user", "content": "hello"}}) + "\n",
         encoding="utf-8",
     )
     projects[0].sessions[0].jsonl_path = transcript
 
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: projects):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -145,7 +145,7 @@ async def _exercise_refresh_keeps_selection() -> None:
             projects[0].sessions.insert(0, fresh)
         return projects
 
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", build):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -182,14 +182,14 @@ async def _exercise_watch(tmp_path: Path) -> None:
     session = projects[0].sessions[0]
     transcript = tmp_path / "watched.jsonl"
     transcript.write_text(
-        json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}}) + "\n",
+        json.dumps({"type": "message", "message": {"role": "user", "content": "hello"}}) + "\n",
         encoding="utf-8",
     )
     session.jsonl_path = transcript
     session.project_path = str(tmp_path)
     session.is_live = True
 
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: projects):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -197,7 +197,7 @@ async def _exercise_watch(tmp_path: Path) -> None:
             await pilot.press("tab")  # sessions pane
             assert app._watch_state(session) == ""
 
-            await pilot.press("w")  # start following
+            await pilot.press("l")  # start following
             await pilot.pause()
             doc = tmp_path / f"_session_{session.session_id}.md"
             assert doc.is_file()
@@ -208,7 +208,7 @@ async def _exercise_watch(tmp_path: Path) -> None:
             details = str(app.query_one("#preview-content", Static).render())
             assert "Live document" in details
 
-            await pilot.press("w")  # stop following
+            await pilot.press("l")  # stop following
             await pilot.pause()
             assert doc.is_file()  # the file stays behind
             assert app._watch_state(session) == "stale"
@@ -229,7 +229,7 @@ async def _exercise_refresh_keeps_scroll() -> None:
         )
         for i in range(60)
     ]
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: projects):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -257,10 +257,10 @@ def test_refresh_keeps_selection_and_scroll():
 
 
 async def _exercise_refresh_keeps_project_sharing_path() -> None:
-    # a Claude worktree's sessions carry the main checkout's cwd: two projects, one path
+    # two project rows can share a path: the selection follows the directory
     projects = _fake_projects()
     projects[1].project_path = projects[0].project_path
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: projects):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -283,12 +283,12 @@ def test_refresh_keeps_project_sharing_a_path():
 
 
 async def _exercise_square_brackets_in_titles(tmp_path: Path) -> None:
-    """A session named with /rename can contain anything, including markup."""
+    """A session named with /name can contain anything, including markup."""
     from textual.widgets import Static
 
     projects = _fake_projects()
     projects[0].sessions[0].summary = "[urgent] refactor the parser"
-    app = CCSessionsApp()
+    app = PiSessionsApp()
     with patch.object(appmod, "discover_projects", lambda **_kw: projects):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()

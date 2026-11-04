@@ -1,14 +1,15 @@
 [project]
-name = "ccsessions-tui"
-version = "0.4.0"
-description = "Terminal UI for browsing, previewing, resuming and managing Claude Code sessions"
+name = "pi-sessions-tui"
+version = "0.1.0"
+description = "Terminal UI for browsing, previewing, resuming and managing pi coding agent sessions"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Marek Miśkiewicz" },
+    { name = "Psychobarge" },
+    { name = "Marek Miśkiewicz" },  # ccsessions, which this is based on
 ]
-keywords = ["claude", "claude-code", "sessions", "tui", "textual", "terminal"]
+keywords = ["pi", "pi-coding-agent", "sessions", "tui", "textual", "terminal"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -29,11 +30,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/miskiewiczm/ccsessions"
-Issues = "https://github.com/miskiewiczm/ccsessions/issues"
+Homepage = "https://github.com/psychobarge/pi-sessions"
+Issues = "https://github.com/psychobarge/pi-sessions/issues"
 
 [project.scripts]
-ccsessions = "ccsessions.__main__:main"
+pisessions = "pi_sessions.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -48,7 +49,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ccsessions"]
+packages = ["pi_sessions"]
 
 [tool.hatch.build.targets.sdist]
 # optional Quarto themes — repo only, never shipped in a package

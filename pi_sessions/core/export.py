@@ -86,7 +86,7 @@ def _min_heading_level(lines: list[str]) -> int:
 
 
 def normalize_markdown(text: str) -> str:
-    """Make message text safe to embed under `### You` / `### Claude`.
+    """Make message text safe to embed under `### You` / `### Pi`.
 
     - headings are demoted so the shallowest one is `####`, staying below the
       day (`##`) and speaker (`###`) headings that frame every turn
@@ -161,8 +161,10 @@ def front_matter(session: Session, extra: dict[str, object] | None = None) -> st
         f"session_id: {q(session.session_id)}",
         f"project: {q(session.project_path)}",
     ]
-    if session.git_branch:
-        lines.append(f"git_branch: {q(session.git_branch)}")
+    if session.model:
+        lines.append(f"model: {q(session.model)}")
+    if session.parent_session:
+        lines.append(f"parent_session: {q(session.parent_session)}")
     if session.created:
         lines.append(f"created: {session.created.isoformat(timespec='seconds')}")
     if session.modified:
@@ -175,7 +177,8 @@ def front_matter(session: Session, extra: dict[str, object] | None = None) -> st
         f"  cache_read: {t.cache_read}",
         f"  cache_write: {t.cache_write}",
         f"  total: {t.total}",
-        "exported_by: ccsessions",
+        f"cost: {t.cost:.4f}",
+        "exported_by: pi-sessions",
     ]
     for key, value in (extra or {}).items():
         lines.append(f"{key}: {q(value) if isinstance(value, str) else value}")
@@ -219,10 +222,12 @@ def markdown_chunks(entries: Iterable[Entry]) -> Iterator[str]:
             if prev_role not in bullets:
                 yield "\n"
             yield f"- {bullets[role]} `{text.replace('`', '')}`\n"
+        elif role == "marker":
+            yield f"\n_{text}_\n"
         elif role == "command-output":
             yield f"\n```txt\n{text}\n```\n"
         else:
-            speaker = "You" if role == "user" else "Claude"
+            speaker = "You" if role == "user" else "Pi"
             yield f"\n### {speaker}{heading_stamp(local)}\n\n{normalize_markdown(text)}\n"
         prev_role = role
 
@@ -251,7 +256,7 @@ def export_raw(session: Session, dest: Path) -> Path:
 
 
 def export_session(session: Session, path_str: str, fmt: str) -> Path:
-    if session.is_missing or not session.jsonl_path.is_file():
+    if not session.jsonl_path.is_file():
         raise ExportError("transcript file not available on this machine")
     dest = resolve_destination(path_str, session, fmt)
     if fmt == RAW:

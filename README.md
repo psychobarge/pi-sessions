@@ -1,68 +1,49 @@
-# ccsessions
+# pi-sessions
 
 A fast terminal UI for browsing, previewing, resuming and managing
-[Claude Code](https://claude.com/claude-code) terminal sessions.
+[pi](https://github.com/earendil-works/pi) coding agent sessions.
 
-![ccsessions in a fullscreen terminal — wide layout with a full-height conversation pane](assets/ccsessions_fullscreen.png)
+A fork of [ccsessions](https://github.com/miskiewiczm/ccsessions) by Marek
+Miśkiewicz, which does the same for Claude Code. The full behaviour is
+specified in [SPECS.md](SPECS.md); changes from ccsessions are listed in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 
-- **Project & session browser** — every Claude Code project on your machine,
-  newest first, with live-session indicators (●), message counts and token
-  usage (input / output / cache read / cache write)
-- **Conversation preview** — the tail of any session rendered with roles,
-  Markdown (for Claude's replies), tool calls (⚙) and slash commands (⌘),
-  without opening Claude Code
-- **One-key resume** — `r` replaces the TUI with `claude --resume <id>` in the
-  session's working directory; `c` copies a ready
-  `cd <dir> && claude --resume <id>` command to the clipboard (OSC 52)
-- **Archive & delete** — move sessions out of `claude --resume` (reversibly)
-  or delete them for good, per session or per project, with confirmation
-  dialogs; sessions whose transcript lives on another synced machine are
-  detected and marked (✕)
-- **Responsive layout** — wide terminals get a side-by-side layout with a
-  full-height conversation pane; narrow (half-screen) terminals get a stacked
-  layout with a full-width conversation pane:
-
-  <img src="assets/ccsessions_halfscreen.png" alt="ccsessions in a half-screen terminal — stacked layout with a full-width conversation pane" width="70%">
-- **Export** — write a whole session to Markdown (YAML front matter with
-  session metadata, then the conversation — ready for Quarto/Pandoc) or copy
-  the raw JSONL transcript verbatim; existing files are never overwritten
-- **Live document** — `w` keeps `_session_<id>.md` in the project directory in
-  sync with a running session, so an external renderer (`quarto preview`,
-  VS Code, Marked, Obsidian) can display the conversation **with LaTeX
-  rendered** while you work in the terminal. Only appended bytes are read, so
-  following a 300 MB transcript costs nothing
-- **Fast** — token stats are cached per transcript (invalidated by
-  mtime + size), scanning runs off the UI thread, and conversation previews
-  read only the tail of multi-megabyte files
+- **Project & session browser** — every pi project on your machine, newest
+  first, with recently-active indicators (●), fork markers (⑂), message
+  counts, token usage and cost
+- **Conversation preview** — the tail of the active branch, rendered with
+  roles, Markdown for pi's replies, tool calls (⚙), `!` commands (⌘) and
+  compaction markers, without opening pi
+- **One-key resume** — `r` replaces the TUI with `pi --session <file>` in the
+  session's working directory; `c` copies the command to the clipboard (OSC 52)
+- **Archive & delete** — move sessions out of `pi --resume` (reversibly) or
+  delete them for good, per session or per project, with confirmation dialogs
+- **Export** — Markdown with YAML front matter (ready for Quarto/Pandoc) or the
+  raw JSONL, never overwriting an existing file
+- **Live document** — `l` keeps `_session_<id>.md` in sync with a running
+  session, so a live-reloading renderer can show it with LaTeX rendered
+- **Fast** — session metadata is cached per file (mtime + size), scanning runs
+  off the UI thread, previews read only the tail of large files
 
 ## Requirements
 
 - Python ≥ 3.10
-- [Claude Code](https://claude.com/claude-code) installed (`claude` on PATH —
-  needed only for resuming)
-- macOS or Linux (Windows untested)
+- pi installed (`pi` on PATH — needed only for resuming)
+- macOS or Linux
 
 ## Installation
 
 ```bash
-pipx install ccsessions-tui        # or: uv tool install ccsessions-tui
-```
-
-Both install the `ccsessions` command.
-
-Or from a clone:
-
-```bash
-git clone https://github.com/miskiewiczm/ccsessions
-pip install -e ccsessions
+git clone https://github.com/psychobarge/pi-sessions
+pip install -e pi-sessions
 ```
 
 ## Usage
 
 ```bash
-ccsessions
+pisessions
 ```
 
 | Key | Action |
@@ -75,94 +56,53 @@ ccsessions
 | `d` | Delete session / project (with confirmation) |
 | `n` | Rename project (set a display alias) |
 | `e` | Export the session (Markdown or raw JSONL) |
-| `w` | Follow the session in a live Markdown document |
+| `l` | Follow the session in a live Markdown document |
 | `/` | Filter the focused list (projects or sessions) |
-| `Ctrl+R` | Rescan `~/.claude` now (a rescan also runs automatically) |
+| `p` | Command palette (change theme) |
+| `Ctrl+R` | Rescan now (a rescan also runs automatically) |
 | `q` | Quit |
 
 `a` and `d` act on the **session** when the Sessions pane is focused and on
 the whole **project** when the Projects pane is focused.
 
-### Live documents
+pi keeps no record of running sessions, so ● means *modified in the last
+`PI_SESSIONS_LIVE_SECONDS` seconds* (default 120). Sessions marked this way
+cannot be archived or deleted.
 
-`w` toggles a live Markdown document for the selected session, written to
-`_session_<session-id>.md` in that session's project directory and updated
-every couple of seconds while ccsessions runs. Point any live-reloading
-Markdown renderer at it — `quarto preview _session_<id>.md` renders LaTeX
-with KaTeX, which is the point: formulas Claude writes in the terminal
-become readable.
+## Configuration
 
-> **If the project is itself a Quarto project**, `quarto preview` serves the
-> project's output directory and cannot reach a document sitting next to it
-> (you get a 404 and a `/../` in the URL). Set `CCSESSIONS_LIVE_DIR` to a
-> plain directory — e.g. `export CCSESSIONS_LIVE_DIR=~/live` — and live
-> documents are written there instead.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PI_SESSIONS_ROOT` | pi's own (`PI_CODING_AGENT_SESSION_DIR`, `$PI_CODING_AGENT_DIR/sessions`, `~/.pi/agent/sessions`) | Where to read sessions |
+| `PI_SESSIONS_PI_BIN` | `pi` | Command used to resume |
+| `PI_SESSIONS_RESUME_ROOT` | — | Rewrite the sessions root in resume commands, for a pi that sees it elsewhere (container) |
+| `PI_SESSIONS_LIVE_SECONDS` | `120` | Recently-active threshold |
+| `PI_SESSIONS_TRASH` | `0` | Delete through the `trash` command |
+| `PI_SESSIONS_LIVE_DIR` | session cwd | Where live documents go (use a plain directory for Quarto projects) |
+| `PI_SESSIONS_REFRESH_SECONDS` | `10` | Auto-refresh interval, `0` disables |
+| `PI_SESSIONS_THEME` | saved choice, else `ansi-dark` | Textual theme |
+| `PI_SESSIONS_CODE_THEME` | follows the theme | Pygments style for code blocks |
+| `PI_SESSIONS_NERD_FONT`, `PI_SESSIONS_EYE`, `PI_SESSIONS_EYE_OFF` | — | Live-document glyphs |
 
-The eye column shows the state: **◉ green** — following a running session,
-**◉ yellow** — following, but the session is not running, **◌ grey** — the
-file exists but nothing is updating it (from an earlier run or another
-machine). With a Nerd Font in your terminal, set `CCSESSIONS_NERD_FONT=1`
-for a proper eye glyph (or set `CCSESSIONS_EYE` / `CCSESSIONS_EYE_OFF` to
-any characters you like). Quitting ccsessions stops all updates and leaves the files in
-place; there are no background processes to track down. Add
-`_session_*.md` to `.gitignore` in git repositories.
+Settings and project aliases live in `~/.config/pi-sessions/`, the cache in
+`~/.cache/pi-sessions/`.
 
-Project names default to the last component of the project's working
-directory. `n` sets a purely cosmetic alias (stored in
-`~/.config/ccsessions/aliases.json` — nothing under `~/.claude` is touched);
-submitting an empty alias removes the entry and restores the default name.
+### pi in a container
 
-Claude worktrees show up as projects of their own, labelled
-`repo ⎇ worktree`: Claude Code gives each worktree a directory under
-`~/.claude/projects`, but the sessions inside report the main checkout's
-working directory, so the path alone cannot tell them apart. Aliases are keyed
-by that directory, so naming one of them leaves the other rows alone.
-
-### Configuration
-
-- **Theme** — switch at runtime with Ctrl+P → "Change theme"; the choice is
-  remembered across runs (`~/.config/ccsessions/settings.json`). The
-  `CCSESSIONS_THEME` env var overrides it. The default `ansi-dark` follows
-  your terminal's palette and keeps terminal transparency; RGB themes
-  (`nord`, `gruvbox`, `tokyo-night`, `dracula`, …) paint opaque backgrounds.
-- **Code blocks** — fenced code follows the app theme with a matching
-  pygments style. Set `CCSESSIONS_CODE_THEME` to pin a specific one
-  (any name from `pygments.styles.get_all_styles()`).
-- `CCSESSIONS_LIVE_DIR` — where live documents (`w`) are written; defaults to
-  the session's own project directory. Point it at a plain directory when your
-  projects are Quarto projects.
-- `CCSESSIONS_REFRESH_SECONDS` — auto-refresh interval (default `10`, `0`
-  disables it). Rescans keep your selection and never scroll the
-  conversation pane; they pause while a dialog or the filter bar is open.
-- `~/.config/ccsessions/aliases.json` — project display aliases, managed
-  with the `n` key.
+If pi runs in Docker with its agent directory in a named volume, the host
+cannot see the sessions. Bind-mount a host directory over the container's
+sessions directory (e.g. `-v ~/.pi/agent/sessions:/root/.pi/agent/sessions`),
+then set `PI_SESSIONS_RESUME_ROOT=/root/.pi/agent/sessions` so resume
+commands use the path pi sees.
 
 ## How it works
 
-ccsessions reads the data Claude Code already keeps on disk:
-
-- `~/.claude/projects/<encoded-path>/*.jsonl` — session transcripts
-- `~/.claude/projects/<encoded-path>/sessions-index.json` — session metadata
-  (summaries, first prompts, message counts)
-- `~/.claude/sessions/*.json` — live-session records (PID liveness is checked
-  with signal 0)
-
-Archiving a session moves its transcript into an `archived/` subdirectory of
-the project folder (invisible to `claude --resume`, fully restorable).
-Archiving a project moves the whole folder to `~/.claude/projects-archive/`;
-archived projects stay listed (dimmed, ▪) after the active ones and can be
-restored with `a`. Deleting removes the transcript and its index entry.
-Token-stats caching lives in `~/.cache/ccsessions/`.
-
-> **Note:** Claude Code automatically deletes transcripts older than its
-> `cleanupPeriodDays` setting (30 days by default). If you rely on your
-> session history, raise that value in `~/.claude/settings.json`.
-
-## Privacy
-
-Everything happens locally: ccsessions only reads files under `~/.claude/`
-and writes its cache under `~/.cache/ccsessions/`. It makes no network
-requests and sends nothing anywhere.
+pi stores each session as `<sessions root>/--<encoded cwd>--/<timestamp>_<id>.jsonl`:
+a header line, then entries linked into a tree. pi-sessions reads those files
+and never modifies them. Archiving a session moves it into an `archived/`
+subdirectory, which pi does not list. Archiving a project moves its directory
+to `sessions-archive/` next to the sessions root. Everything happens locally;
+no network requests.
 
 ## Development
 

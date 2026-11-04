@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ccsessions.core.settings import load_settings, save_settings
-from ccsessions.ui.app import code_theme_for
+from pi_sessions.core.settings import load_settings, save_settings
+from pi_sessions.ui.app import code_theme_for
 
 
 def test_settings_roundtrip(tmp_path):

@@ -22,11 +22,11 @@ class WatchError(RuntimeError):
 def live_docs_dir(session: Session) -> Path:
     """Where live documents go: the session's project directory by default.
 
-    CCSESSIONS_LIVE_DIR redirects them elsewhere — needed when the project is
+    PI_SESSIONS_LIVE_DIR redirects them elsewhere — needed when the project is
     itself a Quarto project, whose preview server serves the project's output
     directory and cannot reach a file sitting next to it.
     """
-    override = os.environ.get("CCSESSIONS_LIVE_DIR", "").strip()
+    override = os.environ.get("PI_SESSIONS_LIVE_DIR", "").strip()
     if override:
         return Path(override).expanduser()
     return Path(session.project_path)
@@ -62,7 +62,7 @@ class LiveDoc:
         self._last_write = 0.0
         self._dirty = True
         if not self.out_path.parent.is_dir():
-            if os.environ.get("CCSESSIONS_LIVE_DIR", "").strip():
+            if os.environ.get("PI_SESSIONS_LIVE_DIR", "").strip():
                 try:  # a directory the user chose — create it for them
                     self.out_path.parent.mkdir(parents=True, exist_ok=True)
                 except OSError as e:

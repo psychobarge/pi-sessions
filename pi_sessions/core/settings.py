@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DEFAULT_SETTINGS_PATH = Path.home() / ".config" / "ccsessions" / "settings.json"
+DEFAULT_SETTINGS_PATH = Path.home() / ".config" / "pi-sessions" / "settings.json"
 
 
 def load_settings(path: Path = DEFAULT_SETTINGS_PATH) -> dict:

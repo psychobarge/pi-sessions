@@ -1,70 +1,70 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 
-from ccsessions.core.cache import TokenCache
-from ccsessions.core.discovery import discover_projects
-from ccsessions.core.manage import ARCHIVE_SUBDIR
+from pi_sessions.core.cache import TokenCache
+from pi_sessions.core.discovery import discover_projects
+from pi_sessions.core.manage import ARCHIVE_SUBDIR
 
-from conftest import SID, write_transcript
+from conftest import PROJECT_DIR, SID, session_file, write_transcript
 
 
-def test_merges_index_metadata_with_jsonl(fake_base):
+def test_metadata_comes_from_the_session_file(fake_base):
     projects = discover_projects(base=fake_base)
     assert len(projects) == 1
     p = projects[0]
     assert p.project_path == "/tmp/fake-project"
+    assert p.display_name == "fake-project"
     s = p.sessions[0]
-    assert s.summary == "Fake session"
-    assert s.message_count == 4  # index value wins
+    assert s.session_id == SID
+    assert s.first_prompt == "question 0"
+    assert s.message_count == 4
     assert s.tokens.total == 30
-    assert not s.is_archived and not s.is_missing
+    assert s.model == "deepseek/deepseek-flash"
+    assert s.created is not None
+    assert not s.is_archived
 
 
-def test_jsonl_without_index(fake_base):
-    proj = fake_base / "-tmp-fake-project"
-    (proj / "sessions-index.json").unlink()
-    projects = discover_projects(base=fake_base)
-    s = projects[0].sessions[0]
-    # metadata recovered from the transcript itself
-    assert projects[0].project_path == "/tmp/fake-project"
-    assert s.message_count == 4  # counted from the JSONL
-    assert s.tokens.total == 30
-
-
-def test_rename_title_wins_and_last_one_counts(fake_base, tmp_path):
-    jsonl = fake_base / "-tmp-fake-project" / f"{SID}.jsonl"
+def test_name_wins_and_is_served_from_the_cache(fake_base, tmp_path):
+    jsonl = session_file(fake_base / PROJECT_DIR)
     with jsonl.open("a", encoding="utf-8") as f:
-        for name in ("first name", "final name"):
-            f.write(json.dumps({"type": "custom-title", "customTitle": name, "sessionId": SID}) + "\n")
+        for i, name in enumerate(("first name", "final name")):
+            f.write(json.dumps({"type": "session_info", "id": f"n{i}", "parentId": "a1", "name": name}) + "\n")
     cache = TokenCache(tmp_path / "cache.json")
     for _ in range(2):  # second pass is served from the cache
         s = discover_projects(base=fake_base, cache=cache)[0].sessions[0]
-        assert s.summary == "final name"  # beats the index summary
+        assert s.summary == "final name"
         assert s.display_title == "final name"
         assert s.tokens.total == 30
 
 
-def test_index_only_entry_is_missing(fake_base):
-    proj = fake_base / "-tmp-fake-project"
-    (proj / f"{SID}.jsonl").unlink()
-    projects = discover_projects(base=fake_base)
-    s = projects[0].sessions[0]
-    assert s.is_missing
-    assert not s.is_archived
-    assert s.tokens.total == 0
+def test_recently_modified_session_is_live(fake_base, monkeypatch):
+    assert discover_projects(base=fake_base)[0].sessions[0].is_live
+    old = time.time() - 3600
+    os.utime(session_file(fake_base / PROJECT_DIR), (old, old))
+    assert not discover_projects(base=fake_base)[0].sessions[0].is_live
+    monkeypatch.setenv("PI_SESSIONS_LIVE_SECONDS", "7200")
+    assert discover_projects(base=fake_base)[0].sessions[0].is_live
+
+
+def test_id_falls_back_to_the_file_name(fake_base):
+    f = session_file(fake_base / PROJECT_DIR)
+    f.write_text("garbage\n", encoding="utf-8")
+    s = discover_projects(base=fake_base)[0].sessions[0]
+    assert s.session_id == SID
+    # no header cwd: the lossy directory decoding is the last resort
+    assert s.project_path == "/tmp/fake/project"
 
 
 def test_archived_subdir_is_scanned(fake_base):
-    proj = fake_base / "-tmp-fake-project"
-    arch = proj / ARCHIVE_SUBDIR
+    arch = fake_base / PROJECT_DIR / ARCHIVE_SUBDIR
     arch.mkdir()
     sid2 = "22222222-aaaa-bbbb-cccc-000000000002"
-    write_transcript(arch / f"{sid2}.jsonl")
-    projects = discover_projects(base=fake_base)
-    by_id = {s.session_id: s for s in projects[0].sessions}
-    assert by_id[sid2].is_archived
-    assert not by_id[sid2].is_missing
+    write_transcript(session_file(arch, sid2), sid=sid2)
+    by_id = {s.session_id: s for s in discover_projects(base=fake_base)[0].sessions}
+    assert by_id[sid2].is_archived and not by_id[sid2].is_live
     assert by_id[sid2].tokens.total == 30
     assert not by_id[SID].is_archived
 
@@ -74,46 +74,45 @@ def test_empty_base_yields_no_projects(tmp_path):
 
 
 def test_archived_projects_listed_after_active(fake_base, tmp_path):
-    arch_base = tmp_path / "projects-archive"
-    arch_proj = arch_base / "-tmp-old-project"
+    arch_proj = tmp_path / "sessions-archive" / "--tmp-old-project--"
     arch_proj.mkdir(parents=True)
     sid2 = "33333333-aaaa-bbbb-cccc-000000000003"
-    write_transcript(arch_proj / f"{sid2}.jsonl", cwd="/tmp/old-project")
+    write_transcript(session_file(arch_proj, sid2), cwd="/tmp/old-project", sid=sid2)
 
-    projects = discover_projects(base=fake_base, archive_base=arch_base)
+    projects = discover_projects(base=fake_base, archive_base=tmp_path / "sessions-archive")
     assert len(projects) == 2
     assert not projects[0].is_archived
     archived = projects[1]
-    assert archived.is_archived
-    # sessions of an archived project are flagged and never live
+    assert archived.is_archived and archived.project_path == "/tmp/old-project"
     assert all(s.is_archived and not s.is_live for s in archived.sessions)
 
 
-def test_project_index_metadata(fake_base):
-    # a second, newer project should sort first
-    proj2 = fake_base / "-tmp-newer"
+def test_newest_project_sorts_first(fake_base):
+    old = time.time() - 3600
+    os.utime(session_file(fake_base / PROJECT_DIR), (old, old))
+    proj2 = fake_base / "--tmp-newer--"
     proj2.mkdir()
-    write_transcript(proj2 / f"{SID}.jsonl", cwd="/tmp/newer")
-    (fake_base / "-tmp-fake-project" / "sessions-index.json").write_text(
-        json.dumps({"version": 1, "originalPath": "/tmp/fake-project", "entries": []}),
-        encoding="utf-8",
-    )
-    projects = discover_projects(base=fake_base)
-    assert [p.project_path for p in projects][0] == "/tmp/newer"
+    write_transcript(session_file(proj2), cwd="/tmp/newer")
+    assert [p.project_path for p in discover_projects(base=fake_base)][0] == "/tmp/newer"
 
 
-def test_worktree_is_told_apart_from_its_main_checkout(fake_base):
-    # Claude Code gives a worktree its own directory, but the sessions inside
-    # report the main checkout's cwd: two projects, one path
-    wt = fake_base / "-tmp-fake-project--claude-worktrees-feature"
-    wt.mkdir()
-    sid2 = "44444444-aaaa-bbbb-cccc-000000000004"
-    write_transcript(wt / f"{sid2}.jsonl", cwd="/tmp/fake-project")
+def test_seen_files_lets_the_cache_be_pruned(fake_base, tmp_path):
+    cache = TokenCache(tmp_path / "cache.json")
+    seen: set[str] = set()
+    discover_projects(base=fake_base, cache=cache, seen_files=seen)
+    assert seen == {str(session_file(fake_base / PROJECT_DIR))}
+    session_file(fake_base / PROJECT_DIR).unlink()
+    seen.clear()
+    discover_projects(base=fake_base, cache=cache, seen_files=seen)
+    cache.prune(seen)
+    assert cache._entries == {}
 
-    projects = discover_projects(base=fake_base)
-    assert len(projects) == 2
-    assert {p.project_path for p in projects} == {"/tmp/fake-project"}
-    assert {p.display_name for p in projects} == {
-        "fake-project",
-        "fake-project ⎇ feature",
-    }
+
+def test_header_id_with_path_separators_is_ignored(fake_base):
+    # the id names the live document file: a crafted header must not steer it
+    f = session_file(fake_base / PROJECT_DIR)
+    lines = f.read_text(encoding="utf-8").splitlines()
+    head = json.loads(lines[0])
+    head["id"] = "../../../etc/evil"
+    f.write_text("\n".join([json.dumps(head), *lines[1:]]) + "\n", encoding="utf-8")
+    assert discover_projects(base=fake_base)[0].sessions[0].session_id == SID
