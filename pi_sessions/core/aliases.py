@@ -45,9 +45,7 @@ class ProjectAliases:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            tmp.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self.path)
         except OSError:
             pass

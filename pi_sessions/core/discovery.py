@@ -67,9 +67,7 @@ def _build_session(
     )
 
 
-def _load_project(
-    proj_dir: Path, cache: TokenCache | None, seen_files: set[str] | None
-) -> Project:
+def _load_project(proj_dir: Path, cache: TokenCache | None, seen_files: set[str] | None) -> Project:
     sessions = [_build_session(f, cache, False, seen_files) for f in proj_dir.glob("*.jsonl")]
     sessions += [
         _build_session(f, cache, True, seen_files)

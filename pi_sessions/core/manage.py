@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import secrets
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import Project, Session
@@ -62,6 +65,41 @@ def restore_session(session: Session) -> Path:
     except OSError as e:
         raise ManageError(str(e)) from e
     return dest
+
+
+def rename_session(session: Session, name: str) -> None:
+    """Append a session_info entry, as pi's /name does — pi and pi-sessions
+    both take the last one. Empty name clears it."""
+    path = session.jsonl_path
+    try:
+        st = path.stat()
+        last_id, ends_nl = None, True
+        with path.open("rb") as f:
+            for line in f:
+                ends_nl = line.endswith(b"\n")
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                # the session header's id is the session id, not a tree node
+                if isinstance(obj, dict) and obj.get("type") != "session":
+                    if isinstance(obj.get("id"), str):
+                        last_id = obj["id"]
+        entry = {
+            "type": "session_info",
+            "id": secrets.token_hex(4),
+            "parentId": last_id,
+            "timestamp": datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            "name": name,
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(("" if ends_nl else "\n") + json.dumps(entry, ensure_ascii=False) + "\n")
+        # a rename is not activity: keep the mtime so it neither reads as live nor reorders
+        os.utime(path, (st.st_atime, st.st_mtime))
+    except OSError as e:
+        raise ManageError(str(e)) from e
 
 
 def _use_trash() -> bool:

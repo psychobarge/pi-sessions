@@ -23,6 +23,8 @@ def test_pi_bin_and_resume_root_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("PI_SESSIONS_RESUME_ROOT", "/root/.pi/agent/sessions")
     with patch.object(resume, "SESSIONS_DIR", tmp_path):
         inside = ResumeRequest("abc", "", str(tmp_path / "--p--" / "f.jsonl"))
-        assert build_resume_command(inside) == "my-pi --session /root/.pi/agent/sessions/--p--/f.jsonl"
+        assert (
+            build_resume_command(inside) == "my-pi --session /root/.pi/agent/sessions/--p--/f.jsonl"
+        )
         outside = ResumeRequest("abc", "", "/elsewhere/f.jsonl")
         assert build_resume_command(outside) == "my-pi --session /elsewhere/f.jsonl"

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from conftest import SID, USAGE, assistant, header, text, user, write_jsonl, write_transcript
+
 from pi_sessions.core.parser import (
     compute_token_stats,
     iter_conversation,
     read_conversation_tail,
 )
-
-from conftest import SID, USAGE, assistant, header, text, user, write_jsonl, write_transcript
 
 
 def test_token_stats_and_metadata(tmp_path):
@@ -39,7 +39,13 @@ def test_name_last_one_wins_and_extra_usage_counts(tmp_path):
             {"type": "session_info", "id": "n2", "parentId": "n1", "name": " final "},
             {"type": "usage", "id": "g1", "parentId": "n2", "kind": "cache_warm", "usage": USAGE},
             {"type": "compaction", "id": "c1", "parentId": "g1", "summary": "s", "usage": USAGE},
-            {"type": "model_change", "id": "m1", "parentId": "c1", "provider": "openai", "modelId": "gpt-x"},
+            {
+                "type": "model_change",
+                "id": "m1",
+                "parentId": "c1",
+                "provider": "openai",
+                "modelId": "gpt-x",
+            },
         ],
     )
     stats = compute_token_stats(f)
@@ -64,27 +70,70 @@ def test_conversation_tail_roles(tmp_path):
         f,
         [
             header(),
-            {"type": "message", "id": "s0", "parentId": None,
-             "message": {"role": "system", "content": "", "sections": {}}},
+            {
+                "type": "message",
+                "id": "s0",
+                "parentId": None,
+                "message": {"role": "system", "content": "", "sections": {}},
+            },
             user("u0", "s0", "hello"),
-            assistant("a0", "u0", [
-                {"type": "thinking", "thinking": "hmm"},
-                text("hi!"),
-                {"type": "toolCall", "id": "c", "name": "bash", "arguments": {"command": "ls -la"}},
-                {"type": "toolCall", "id": "d", "name": "read", "arguments": {"path": "a.py"}},
-            ]),
-            {"type": "message", "id": "t0", "parentId": "a0",
-             "message": {"role": "toolResult", "toolName": "bash", "content": [text("out")]}},
-            {"type": "message", "id": "b0", "parentId": "t0",
-             "message": {"role": "bashExecution", "command": "git status", "output": "clean\n"}},
-            {"type": "custom_message", "id": "x0", "parentId": "b0", "customType": "plan",
-             "content": "PLAN MODE", "display": True},
-            {"type": "custom_message", "id": "x1", "parentId": "x0", "customType": "hidden",
-             "content": "secret", "display": False},
-            {"type": "compaction", "id": "c0", "parentId": "x1", "summary": "s", "tokensBefore": 5000},
+            assistant(
+                "a0",
+                "u0",
+                [
+                    {"type": "thinking", "thinking": "hmm"},
+                    text("hi!"),
+                    {
+                        "type": "toolCall",
+                        "id": "c",
+                        "name": "bash",
+                        "arguments": {"command": "ls -la"},
+                    },
+                    {"type": "toolCall", "id": "d", "name": "read", "arguments": {"path": "a.py"}},
+                ],
+            ),
+            {
+                "type": "message",
+                "id": "t0",
+                "parentId": "a0",
+                "message": {"role": "toolResult", "toolName": "bash", "content": [text("out")]},
+            },
+            {
+                "type": "message",
+                "id": "b0",
+                "parentId": "t0",
+                "message": {"role": "bashExecution", "command": "git status", "output": "clean\n"},
+            },
+            {
+                "type": "custom_message",
+                "id": "x0",
+                "parentId": "b0",
+                "customType": "plan",
+                "content": "PLAN MODE",
+                "display": True,
+            },
+            {
+                "type": "custom_message",
+                "id": "x1",
+                "parentId": "x0",
+                "customType": "hidden",
+                "content": "secret",
+                "display": False,
+            },
+            {
+                "type": "compaction",
+                "id": "c0",
+                "parentId": "x1",
+                "summary": "s",
+                "tokensBefore": 5000,
+            },
             {"type": "custom", "id": "y0", "parentId": "c0", "customType": "z", "data": {}},
-            {"type": "message", "id": "w0", "parentId": "y0",
-             "message": {"role": "someFutureRole", "content": "?"}},
+            {
+                "type": "message",
+                "id": "w0",
+                "parentId": "y0",
+                "message": {"role": "someFutureRole", "content": "?"},
+            },
         ],
     )
     assert [(e.role, e.text) for e in read_conversation_tail(f)] == [

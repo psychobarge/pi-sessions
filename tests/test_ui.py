@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from pathlib import Path
 from unittest.mock import patch
 
-import pi_sessions.ui.app as appmod
-from pi_sessions.core.models import Project, Session
-from pi_sessions.core import settings as settings_mod
+from rich.console import Console
 from textual.widgets import Static
 
+import pi_sessions.ui.app as appmod
+from pi_sessions.core import settings as settings_mod
+from pi_sessions.core.models import Project, Session
 from pi_sessions.ui.app import PiSessionsApp
 
 
@@ -177,8 +179,6 @@ def test_refresh_keeps_selection():
 async def _exercise_watch(tmp_path: Path) -> None:
     import json
 
-    from textual.widgets import DataTable
-
     projects = _fake_projects()
     session = projects[0].sessions[0]
     transcript = tmp_path / "watched.jsonl"
@@ -206,8 +206,9 @@ async def _exercise_watch(tmp_path: Path) -> None:
             assert "### You\n\nhello" in doc.read_text(encoding="utf-8")
 
             # the details pane advertises the document path
-            details = str(app.query_one("#preview-content", Static).render())
-            assert "Live document" in details
+            console = Console(width=100, record=True, file=io.StringIO())
+            console.print(app.query_one("#preview-content", Static).content)
+            assert "Live document" in console.export_text()
 
             await pilot.press("l")  # stop following
             await pilot.pause()
@@ -350,7 +351,9 @@ async def _exercise_drag_border(tmp_path: Path) -> None:
     with (
         patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()),
         patch.object(appmod, "load_settings", lambda: settings_mod.load_settings(settings_path)),
-        patch.object(appmod, "save_settings", lambda s: settings_mod.save_settings(s, settings_path)),
+        patch.object(
+            appmod, "save_settings", lambda s: settings_mod.save_settings(s, settings_path)
+        ),
     ):
         # built inside the patch: __init__ reads the saved layout
         app = PiSessionsApp()
@@ -427,7 +430,10 @@ def test_drag_border_resizes_and_remembers(tmp_path):
 
 def test_load_layout_ignores_malformed_entries():
     layout = appmod._load_layout(
-        {"wide": {"group": {"width": 40}, "conv-scroll": {"width": 10}}, "narrow": {"group": {"height": "x"}}}
+        {
+            "wide": {"group": {"width": 40}, "conv-scroll": {"width": 10}},
+            "narrow": {"group": {"height": "x"}},
+        }
     )
     assert layout == {"wide": {"group": {"width": 40.0}}, "narrow": {}}
     assert appmod._load_layout(None) == {"wide": {}, "narrow": {}}
@@ -437,13 +443,18 @@ async def _exercise_reset_layout(tmp_path: Path) -> None:
     settings_path = tmp_path / "settings.json"
     # sizes dragged earlier in both layouts
     settings_mod.save_settings(
-        {"theme": "nord", "layout": {"wide": {"group": {"width": 30}}, "narrow": {"group": {"height": 70}}}},
+        {
+            "theme": "nord",
+            "layout": {"wide": {"group": {"width": 30}}, "narrow": {"group": {"height": 70}}},
+        },
         settings_path,
     )
     with (
         patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()),
         patch.object(appmod, "load_settings", lambda: settings_mod.load_settings(settings_path)),
-        patch.object(appmod, "save_settings", lambda s: settings_mod.save_settings(s, settings_path)),
+        patch.object(
+            appmod, "save_settings", lambda s: settings_mod.save_settings(s, settings_path)
+        ),
     ):
         # built inside the patch: __init__ reads the saved layout
         app = PiSessionsApp()
@@ -470,3 +481,167 @@ async def _exercise_reset_layout(tmp_path: Path) -> None:
 
 def test_reset_layout_command(tmp_path):
     asyncio.run(_exercise_reset_layout(tmp_path))
+
+
+async def _exercise_title_fits() -> None:
+    projects = _fake_projects()
+    projects[0].project_path = "/tmp/" + "y" * 200
+    projects[0].sessions[0].first_prompt = "x" * 200
+    app = PiSessionsApp()
+    with patch.object(appmod, "discover_projects", lambda **_kw: projects):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            tables = [app.query_one("#projects-table"), app.query_one("#sessions-table")]
+            narrow = []
+            for t in tables:
+                # long names are elided instead of scrolling the table sideways
+                assert t.virtual_size.width <= t.scrollable_content_region.width
+                narrow.append(t.columns["fit"].width)
+            await pilot.resize_terminal(200, 40)
+            await pilot.pause()
+            await pilot.pause()
+            for t, before in zip(tables, narrow, strict=True):
+                assert t.columns["fit"].width > before
+
+
+def test_title_column_fits_pane():
+    asyncio.run(_exercise_title_fits())
+
+
+async def _exercise_sort() -> None:
+    app = PiSessionsApp()
+    projects = _fake_projects()
+    for s, n in zip(projects[0].sessions, (3, 9), strict=True):
+        s.message_count = n
+    with patch.object(appmod, "discover_projects", lambda **_kw: projects):
+        async with app.run_test(size=(120, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            from textual.widgets import DataTable
+
+            st = app.query_one("#sessions-table", DataTable)
+
+            def click_msgs() -> None:
+                col = st.columns["msgs"]
+                idx = st.get_column_index("msgs")
+                app.on_data_table_header_selected(
+                    DataTable.HeaderSelected(st, col.key, idx, col.label)
+                )
+
+            # header hover lights only the hovered label, and only a sortable one
+            from textual.coordinate import Coordinate
+
+            msgs = Coordinate(-1, st.get_column_index("msgs"))
+            title = Coordinate(-1, st.get_column_index("fit"))
+            assert st._should_highlight(msgs, msgs, "row")
+            assert not st._should_highlight(title, title, "row")
+            assert not st._should_highlight(msgs, Coordinate(-1, msgs.column + 1), "row")
+
+            ids = lambda: [s.session_id for s in app._vsessions]  # noqa: E731
+            assert ids() == ["s1", "s2"]
+            click_msgs()
+            assert ids() == ["s2", "s1"] and str(st.columns["msgs"].label) == "Msgs ▼"
+            click_msgs()
+            assert ids() == ["s1", "s2"] and str(st.columns["msgs"].label) == "Msgs ▲"
+            click_msgs()
+            assert ids() == ["s1", "s2"] and str(st.columns["msgs"].label) == "Msgs"
+
+            # every sortable column, both tables, must have comparable keys
+            for table in (st, app.query_one("#projects-table", DataTable)):
+                for key in appmod.SORTABLE[table.id]:
+                    col = table.columns[key]
+                    for _ in range(3):
+                        app.on_data_table_header_selected(
+                            DataTable.HeaderSelected(table, col.key, 0, col.label)
+                        )
+
+
+def test_header_click_cycles_sort() -> None:
+    asyncio.run(_exercise_sort())
+
+
+async def _exercise_show_modified_setting(tmp_path) -> None:
+    settings_path = tmp_path / "settings.json"
+    with (
+        patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()),
+        patch.object(appmod, "load_settings", lambda: settings_mod.load_settings(settings_path)),
+        patch.object(
+            appmod, "save_settings", lambda s: settings_mod.save_settings(s, settings_path)
+        ),
+    ):
+        app = PiSessionsApp()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            table = app.query_one("#sessions-table")
+            assert "modified" in table.columns
+            app._sort["sessions-table"] = ("modified", True)
+            wide_before = table.columns["fit"].width
+
+            commands = [c.title for c in app.get_system_commands(app.screen)]
+            assert "Settings" in commands
+            app.push_screen(appmod.SettingsScreen())
+            await pilot.pause()
+            await pilot.click("#show_modified")
+            await pilot.pause()
+            assert "modified" not in table.columns
+            assert table.row_count and len(table.get_row_at(0)) == len(table.columns)
+            assert "sessions-table" not in app._sort  # sort on a hidden column is dropped
+            assert settings_mod.load_settings(settings_path)["show_modified"] is False
+
+            def details() -> str:
+                console = Console(width=200, record=True, file=io.StringIO())
+                console.print(app.query_one("#preview-content", Static).content)
+                return console.export_text()
+
+            assert "Resume command : press c to copy" in details()  # hidden by default
+            await pilot.click("#show_resume_command")
+            await pilot.pause()
+            assert "Resume command : press c to copy" not in details()
+            assert "Resume command" in details()
+            assert settings_mod.load_settings(settings_path)["show_resume_command"] is True
+            await pilot.press("escape")
+            await pilot.pause()
+            assert table.columns["fit"].width > wide_before  # Title takes the room
+
+        # the choice survives a restart
+        app = PiSessionsApp()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "modified" not in app.query_one("#sessions-table").columns
+
+
+def test_show_modified_setting(tmp_path):
+    asyncio.run(_exercise_show_modified_setting(tmp_path))
+
+
+async def _exercise_fit_table_shrink() -> None:
+    from textual.app import App
+
+    class FitApp(App):
+        def compose(self):
+            yield appmod.FitTable()
+
+        def on_mount(self) -> None:
+            table = self.query_one(appmod.FitTable)
+            table.styles.width = 60
+            table.add_column("Title", key="fit")
+            table.add_column("Tokens")
+            table.add_row("x" * 80, "12.3k")
+
+    app = FitApp()
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause()
+        table = app.query_one(appmod.FitTable)
+        table.styles.width = 40
+        # no further events: the fit width must settle within the resize's idle
+        await asyncio.sleep(0.3)
+        assert table.virtual_size.width == table.size.width
+        assert not table.show_horizontal_scrollbar
+
+
+def test_fit_table_shrink_leaves_no_horizontal_scrollbar():
+    asyncio.run(_exercise_fit_table_shrink())

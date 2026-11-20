@@ -29,6 +29,10 @@ Based on a fork of [ccsessions](https://github.com/miskiewiczm/ccsessions) by Ma
   raw JSONL, never overwriting an existing file
 - **Live document** — `l` keeps `_session_<id>.md` in sync with a running
   session, so a live-reloading renderer can show it with LaTeX rendered
+- **Update check** — on launch, a newer PyPI release is shown in the header
+  with its upgrade command; nothing is installed for you. Disable with
+  `"check_updates": false` in `~/.config/pi-sessions/settings.json`;
+  `pisessions --version` prints the installed version
 - **Fast** — session metadata is cached per file (mtime + size), scanning runs
   off the UI thread, previews read only the tail of large files
 
@@ -44,7 +48,8 @@ Each installs the `pisessions` command. Needs Python ≥ 3.10 on macOS or Linux;
 ## Use
 
 ```bash
-pisessions
+pisessions # launch
+pisessions --version # show version
 ```
 
 | Key | Action |
@@ -55,11 +60,11 @@ pisessions
 | `c` | Copy the resume command to the clipboard |
 | `a` | Archive ↔ restore session · archive ↔ restore project |
 | `d` | Delete session / project (with confirmation) |
-| `n` | Rename project (set a display alias) |
+| `n` | Rename session (as pi's `/name`) · rename project (display alias) |
 | `e` | Export the session (Markdown or raw JSONL) |
 | `l` | Follow the session in a live Markdown document |
 | `/` | Filter the focused list (projects or sessions) |
-| `p` | Command palette (change theme) |
+| `p` | Command palette (main menu : settings, change theme, reset, etc...) |
 | `Ctrl+R` | Rescan now (a rescan also runs automatically) |
 | `q` | Quit |
 
@@ -115,7 +120,7 @@ python docs/screenshots.py   # regenerate the README screenshots from fake sessi
 
 ## Known limitations
 
-- **"Running" is a guess.** pi keeps no record of running sessions, so ● means *modified in the last `PI_SESSIONS_LIVE_SECONDS` seconds* (default 120). Sessions marked this way cannot be archived or deleted; an idle pi session past that delay can.
+- **"Running" is a guess.** pi keeps no record of running sessions and writes to the session file only when something happens, so ● means *modified in the last `PI_SESSIONS_LIVE_SECONDS` seconds* (default 120). Sessions marked this way cannot be archived, deleted or renamed. A session still open in pi but idle past that delay shows as stopped, and nothing stops you from archiving, deleting or renaming it: close it in pi first (renaming an open session leaves the name on a dead branch, so pi ignores it).
 
 ## Changelog
 

@@ -138,7 +138,7 @@ def _read_token_stats(
     return stats, end, ids
 
 
-def get_token_stats(jsonl_path: Path, cache: "TokenCache | None" = None) -> TokenStats:
+def get_token_stats(jsonl_path: Path, cache: TokenCache | None = None) -> TokenStats:
     """Like compute_token_stats, but skips the read when the cache is fresh,
     and reads only the new lines of a session file that grew (a live session)."""
     if cache is None:
@@ -162,7 +162,15 @@ def get_token_stats(jsonl_path: Path, cache: "TokenCache | None" = None) -> Toke
 
 
 _TOOL_ARG_KEYS = (
-    "command", "path", "file_path", "pattern", "query", "url", "prompt", "description", "skill",
+    "command",
+    "path",
+    "file_path",
+    "pattern",
+    "query",
+    "url",
+    "prompt",
+    "description",
+    "skill",
 )
 
 
@@ -204,7 +212,11 @@ def entries_from_obj(obj: dict) -> list[Entry]:
         if obj.get("display") is not True:
             return []
         text = _text_of(obj.get("content"))
-        return [Entry("command-output", f"[{obj.get('customType') or 'extension'}] {text}", ts)] if text else []
+        return (
+            [Entry("command-output", f"[{obj.get('customType') or 'extension'}] {text}", ts)]
+            if text
+            else []
+        )
     if typ != "message":
         return []
 
@@ -254,7 +266,9 @@ def active_branch(objs: list[dict]) -> list[dict]:
     yields the tail of the branch). Entries without an `id` (legacy v1
     files) all count as on the branch.
     """
-    by_id = {o["id"]: o for o in objs if isinstance(o.get("id"), str) and o.get("type") != "session"}
+    by_id = {
+        o["id"]: o for o in objs if isinstance(o.get("id"), str) and o.get("type") != "session"
+    }
     if not by_id:
         return objs
     leaf = next(o for o in reversed(objs) if o.get("id") in by_id and o.get("type") != "session")

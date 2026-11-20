@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 
+from conftest import write_transcript
+
 from pi_sessions.core.cache import TokenCache
 from pi_sessions.core.parser import compute_token_stats, get_token_stats
-
-from conftest import write_transcript
 
 
 def test_cache_roundtrip_and_invalidation(tmp_path):

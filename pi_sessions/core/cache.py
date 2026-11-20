@@ -29,9 +29,7 @@ class TokenCache:
         except (OSError, json.JSONDecodeError):
             return
         if isinstance(data, dict):
-            self._entries = {
-                k: v for k, v in data.items() if isinstance(v, dict)
-            }
+            self._entries = {k: v for k, v in data.items() if isinstance(v, dict)}
 
     def get(self, jsonl: Path, stat: os.stat_result | None = None) -> TokenStats | None:
         if stat is None:

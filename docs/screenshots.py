@@ -1,5 +1,10 @@
 """Regenerate the README screenshots from fake sessions: python docs/screenshots.py"""
-import asyncio, json, os, sys, tempfile, time
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 DOCS = Path(__file__).resolve().parent
@@ -58,7 +63,8 @@ session(f"{home}/invoice-parser", 8, 6, [
     ("Set up the project with uv and pytest", [T("Project initialised.")], 3000)], age=10 * 86400)
 
 sys.path.insert(0, str(DOCS.parent))
-from pi_sessions.ui.app import PiSessionsApp
+from pi_sessions.ui.app import PiSessionsApp  # noqa: E402 — after the sys.path insert
+
 
 async def shoot(size, name):
     app = PiSessionsApp()

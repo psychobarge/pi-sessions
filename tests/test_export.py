@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from conftest import assistant, header, text, user, write_jsonl
 
 from pi_sessions.core.export import (
     MARKDOWN,
@@ -18,20 +18,31 @@ from pi_sessions.core.export import (
 )
 from pi_sessions.core.models import Entry, Session, TokenStats
 
-from conftest import assistant, header, text, user, write_jsonl
-
 
 def _session(tmp_path: Path) -> Session:
     jsonl = tmp_path / "sess.jsonl"
     objs = [
         header(),
         user("u0", None, "how do I sort a list?"),
-        assistant("a0", "u0", [
-            text("Use `sorted()`:\n\n```python\nsorted(xs)\n```"),
-            {"type": "toolCall", "id": "c", "name": "bash", "arguments": {"command": "python3 -c 1"}},
-        ]),
-        {"type": "message", "id": "b0", "parentId": "a0",
-         "message": {"role": "bashExecution", "command": "ls", "output": "a.txt"}},
+        assistant(
+            "a0",
+            "u0",
+            [
+                text("Use `sorted()`:\n\n```python\nsorted(xs)\n```"),
+                {
+                    "type": "toolCall",
+                    "id": "c",
+                    "name": "bash",
+                    "arguments": {"command": "python3 -c 1"},
+                },
+            ],
+        ),
+        {
+            "type": "message",
+            "id": "b0",
+            "parentId": "a0",
+            "message": {"role": "bashExecution", "command": "ls", "output": "a.txt"},
+        },
         {"type": "compaction", "id": "c0", "parentId": "b0", "summary": "s", "tokensBefore": 10},
     ]
     for o in objs:
@@ -165,10 +176,20 @@ def test_insight_block_gets_inner_blank_lines():
 
 def test_consecutive_tool_calls_form_a_tight_list(tmp_path):
     jsonl = tmp_path / "tools.jsonl"
-    write_jsonl(jsonl, [header(), assistant("a0", None, [
-        {"type": "toolCall", "id": "1", "name": "edit", "arguments": {"path": "/a.py"}},
-        {"type": "toolCall", "id": "2", "name": "edit", "arguments": {"path": "/b.py"}},
-    ])])
+    write_jsonl(
+        jsonl,
+        [
+            header(),
+            assistant(
+                "a0",
+                None,
+                [
+                    {"type": "toolCall", "id": "1", "name": "edit", "arguments": {"path": "/a.py"}},
+                    {"type": "toolCall", "id": "2", "name": "edit", "arguments": {"path": "/b.py"}},
+                ],
+            ),
+        ],
+    )
     s = _session(tmp_path)
     s.jsonl_path = jsonl
     dest = export_session(s, str(tmp_path / "tools.md"), MARKDOWN)

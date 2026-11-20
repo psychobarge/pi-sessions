@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import argparse
 import sys
 
+from . import __version__
 from .core.resume import ResumeError, ResumeRequest, execute_resume
 from .ui.app import PiSessionsApp
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(prog="pisessions")
+    parser.add_argument("-V", "--version", action="version", version=f"pisessions {__version__}")
+    parser.parse_args()
     app = PiSessionsApp()
     result = app.run()
     if isinstance(result, ResumeRequest):

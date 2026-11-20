@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -11,21 +10,25 @@ from rich.console import Group
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.padding import Padding
+from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme as RichTheme
 from textual import events, work
 from textual.app import App, ComposeResult, SystemCommand
-from textual.color import Color as TextualColor
 from textual.binding import Binding
+from textual.color import Color as TextualColor
 from textual.containers import Container, Horizontal, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.errors import NoWidget
+from textual.geometry import Region
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Static
+from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Static
 from textual.widgets._footer import FooterKey
 from textual.worker import get_current_worker
 
+from .. import __version__
 from ..core.aliases import ProjectAliases
 from ..core.cache import TokenCache
 from ..core.discovery import discover_projects
@@ -36,6 +39,7 @@ from ..core.manage import (
     archive_session,
     delete_project,
     delete_session,
+    rename_session,
     restore_project,
     restore_session,
 )
@@ -43,8 +47,8 @@ from ..core.models import Project, Session, TokenStats
 from ..core.parser import read_conversation_tail
 from ..core.resume import ResumeRequest, build_resume_command
 from ..core.settings import load_settings, save_settings
+from ..core.update import is_newer, latest_version, upgrade_command
 from ..core.watch import LiveDoc, WatchError, gitignore_hint, has_live_doc, live_doc_path
-
 
 # explicit pygments style for fenced code blocks (empty = follow the app
 # theme); any name from `pygments.styles.get_all_styles()` works
@@ -120,6 +124,7 @@ def _auto_refresh_seconds() -> float:
         return 10.0
     return max(0.0, value)
 
+
 # app theme -> closest built-in pygments style for fenced code blocks
 PYGMENTS_FOR_THEME = {
     "nord": "nord",
@@ -174,7 +179,7 @@ def rich_color(theme_color: str | None, fallback: str) -> str:
     if not theme_color:
         return fallback
     if theme_color.startswith("ansi_"):
-        return theme_color[len("ansi_"):]
+        return theme_color[len("ansi_") :]
     return theme_color
 
 
@@ -379,6 +384,68 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class Tick(Checkbox):
+    """Checkbox that is empty when off; the stock one greys an X, which reads as ticked."""
+
+    @property
+    def BUTTON_INNER(self) -> str:  # noqa: N802 — overrides Textual's class attribute
+        return "X" if self.value else " "
+
+
+class SettingsScreen(ModalScreen[None]):
+    """User preferences; each change applies and saves immediately."""
+
+    DEFAULT_CSS = """
+    SettingsScreen {
+        align: center middle;
+    }
+
+    #dialog {
+        width: 60;
+        height: auto;
+        padding: 1 2;
+        border: round $primary;
+        background: $surface;
+    }
+
+    .section {
+        text-style: bold;
+    }
+
+    #dialog-hint {
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "dismiss", "Close")]
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Static("Display", classes="section")
+            yield Tick(
+                "Show Modified column in Sessions",
+                load_settings().get("show_modified", True),
+                id="show_modified",
+            )
+            yield Static("Details", classes="section")
+            yield Tick(
+                "Show resume command",
+                load_settings().get("show_resume_command", False),
+                id="show_resume_command",
+            )
+            yield Static("Esc to close", id="dialog-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#dialog").border_title = "Settings"
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id == "show_resume_command":
+            self.app.set_show_resume_command(event.value)  # type: ignore[attr-defined]
+        else:
+            self.app.set_show_modified(event.value)  # type: ignore[attr-defined]
+
+
 class FilterInput(Input):
     """Filter bar input; Escape clears the filter and hides the bar."""
 
@@ -392,7 +459,7 @@ class FilterInput(Input):
 
 
 class RenameScreen(ModalScreen[str | None]):
-    """Prompt for a project alias. Empty input restores the default name."""
+    """Prompt for a name. Empty input restores the default name."""
 
     DEFAULT_CSS = """
     RenameScreen {
@@ -415,14 +482,17 @@ class RenameScreen(ModalScreen[str | None]):
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, default_name: str, current_alias: str) -> None:
+    def __init__(self, default_name: str, current_alias: str, label: str = "Alias") -> None:
         super().__init__()
+        self._label = label
         self._default_name = default_name
         self._current_alias = current_alias
 
     def compose(self) -> ComposeResult:
         with Container(id="rename-dialog"):
-            yield Static(f"Alias for “{self._default_name}”", id="rename-title", markup=False)
+            yield Static(
+                f"{self._label} for “{self._default_name}”", id="rename-title", markup=False
+            )
             yield Static(
                 "Enter = save · Escape = cancel · empty = restore default name",
                 id="rename-hint",
@@ -530,6 +600,79 @@ def _load_layout(raw: object) -> dict[str, dict[str, dict[str, float]]]:
                 if isinstance(value, (int, float)) and 0 < value < 100:
                     panes[pane_id] = {dimension: float(value)}
     return layout
+
+
+class FitTable(DataTable):
+    """The column keyed "fit" takes the width the other columns leave, elided."""
+
+    FIT_MIN = 15
+
+    # ponytail: hooks DataTable's private sizing pass (Textual 8.x); recheck on upgrade
+    def _update_dimensions(self, new_rows: Iterable) -> None:
+        super()._update_dimensions(new_rows)  # measures the other columns first
+        fit = self.columns.get("fit")
+        if fit is None:
+            return
+        others = sum(c.get_render_width(self) for k, c in self.columns.items() if k != "fit")
+        # reserve the vertical scrollbar only when the rows overflow (row height 1)
+        # self.size is the content box already: border/padding are excluded
+        bar = self.styles.scrollbar_size_vertical
+        if self.row_count <= self.size.height - self.header_height:
+            bar = 0
+        room = self.size.width - bar
+        width = max(self.FIT_MIN, room - others - 2 * self.cell_padding)
+        if fit.auto_width or fit.width != width:
+            fit.auto_width, fit.width = False, width
+            self._clear_caches()
+            # recompute virtual_size now: a deferred rerun waits for an idle that
+            # may never come after the last resize, leaving a stale h-scrollbar
+            super()._update_dimensions(())
+
+    def on_resize(self, _: events.Resize) -> None:
+        self._require_update_dimensions = True
+
+
+# table id -> column key -> (label, sort key); other columns are not sortable
+SORTABLE = {
+    "projects-table": {
+        "sessions": ("Sessions", lambda p: sum(not s.is_archived for s in p.sessions)),
+        "tokens": ("Tokens", lambda p: p.total_tokens.total),
+    },
+    "sessions-table": {
+        "msgs": ("Msgs", lambda s: s.message_count),
+        "tokens": ("Tokens", lambda s: s.tokens.total),
+        "modified": ("Modified", lambda s: s.modified or datetime.min),
+    },
+}
+
+
+class SortTable(FitTable):
+    """Hovering the header lights only a sortable (clickable) column label."""
+
+    # ponytail: overrides DataTable private hooks (Textual 8.x); recheck on upgrade
+    def _should_highlight(self, cursor: Coordinate, target_cell: Coordinate, type_of_cursor):
+        if target_cell.row != -1:
+            return super()._should_highlight(cursor, target_cell, type_of_cursor)
+        # the row cursor never sits on the header, so only the hover gets here
+        if cursor != target_cell or not 0 <= target_cell.column < len(self.ordered_columns):
+            return False
+        key = self.ordered_columns[target_cell.column].key.value
+        return key in SORTABLE.get(self.id or "", {})
+
+    def _refresh_header(self) -> None:
+        # refresh_coordinate() ignores the header row
+        if self.show_header:
+            self.refresh(Region(0, 0, self.size.width, self.header_height))
+
+    def watch_hover_coordinate(self, old: Coordinate, value: Coordinate) -> None:
+        super().watch_hover_coordinate(old, value)
+        if -1 in (old.row, value.row):
+            self._refresh_header()
+
+    def _set_hover_cursor(self, active: bool) -> None:
+        super()._set_hover_cursor(active)
+        if self.hover_row == -1:
+            self._refresh_header()
 
 
 class PiSessionsApp(App):
@@ -666,22 +809,26 @@ class PiSessionsApp(App):
         # snapshots of the currently displayed (filtered) rows
         self._vprojects: list[Project] = []
         self._vsessions: list[Session] = []
+        # table id -> (column key, descending); absent = discovery order
+        self._sort: dict[str, tuple[str, bool]] = {}
         # pane sizes dragged by their borders, per layout mode:
         # {"wide": {"group": {"width": 40.0}}, "narrow": {...}}
         self._layout = _load_layout(load_settings().get("layout"))
         self._mode = ""
+        self._show_modified = load_settings().get("show_modified", True)
+        self._show_resume_command = load_settings().get("show_resume_command", False)
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Panes(id="main"):
             with Container(id="group"):
                 with Container(id="sub"):
-                    yield DataTable(
+                    yield SortTable(
                         id="projects-table",
                         cursor_type="row",
                         zebra_stripes=True,
                     )
-                    yield DataTable(
+                    yield SortTable(
                         id="sessions-table",
                         cursor_type="row",
                         zebra_stripes=True,
@@ -739,10 +886,40 @@ class PiSessionsApp(App):
             "Put every pane back to its default size (wide and narrow layouts)",
             self.action_reset_layout,
         )
+        yield SystemCommand(
+            "Settings", "Display preferences", lambda: self.push_screen(SettingsScreen())
+        )
+
+    def set_show_modified(self, show: bool) -> None:
+        self._show_modified = show
+        settings = load_settings()
+        settings["show_modified"] = show
+        save_settings(settings)
+        if self._sort.get("sessions-table", ("",))[0] == "modified":
+            del self._sort["sessions-table"]
+        self._build_session_columns()
+        self._show_sessions_for(self.query_one("#projects-table", DataTable).cursor_row)
+
+    def set_show_resume_command(self, show: bool) -> None:
+        self._show_resume_command = show
+        settings = load_settings()
+        settings["show_resume_command"] = show
+        save_settings(settings)
+        self._update_preview(self._current_session(), force=True)
+
+    def _build_session_columns(self) -> None:
+        stable = self.query_one("#sessions-table", DataTable)
+        stable.clear(columns=True)
+        stable.add_column("  ")  # status marker + watch eye share one cell
+        stable.add_column("Title", key="fit")
+        for key, (label, _) in SORTABLE["sessions-table"].items():
+            if key != "modified" or self._show_modified:
+                stable.add_column(label, key=key)
+        self._label_sort_arrows(stable)
 
     def on_mount(self) -> None:
         self.title = "Pi Sessions"
-        self.sub_title = ""
+        self.sub_title = f"v{__version__}"  # replaced if a newer release exists
         # precedence: env var > theme saved from a previous run > default
         requested = APP_THEME_OVERRIDE or load_settings().get("theme") or "ansi-dark"
         try:
@@ -751,15 +928,20 @@ class PiSessionsApp(App):
             self.theme = "ansi-dark"  # unknown theme name — fall back
         self._apply_markdown_styles()
         ptable = self.query_one("#projects-table", DataTable)
-        ptable.add_columns(" ", "Project", "Sessions", "Tokens")
+        # live marker sits in the name cell: one space instead of two paddings
+        ptable.add_column("  Project", key="fit")
+        for key, (label, _) in SORTABLE["projects-table"].items():
+            ptable.add_column(label, key=key)
         ptable.border_title = "Projects"
+        self._build_session_columns()
         stable = self.query_one("#sessions-table", DataTable)
-        stable.add_columns(" ", "  ", "Title", "Msgs", "Tokens", "Modified")
         stable.border_title = "Sessions"
         self.query_one("#info-scroll").border_title = "Details"
         self.query_one("#conv-scroll").border_title = "Conversation"
         self.action_refresh()
         ptable.focus()
+        if load_settings().get("check_updates", True):
+            self._check_update()
         self.watch(self.screen, "focused", self._highlight_focused_pane)
         interval = _auto_refresh_seconds()
         if interval:
@@ -823,10 +1005,17 @@ class PiSessionsApp(App):
             return
         self._scan()
 
+    @work(thread=True, group="update")
+    def _check_update(self) -> None:
+        latest = latest_version()
+        if latest and is_newer(latest, __version__):
+            self.call_from_thread(
+                setattr, self, "sub_title", f"v{latest} available — {upgrade_command()}"
+            )
+
     @work(thread=True, exclusive=True, group="scan")
     def _scan(self) -> None:
         """Disk scan off the UI thread — the interface stays responsive."""
-        started = time.monotonic()
         seen: set[str] = set()
         projects = discover_projects(cache=self._cache, seen_files=seen)
         # superseded by a newer scan: applying this one could undo a fresher result,
@@ -836,10 +1025,9 @@ class PiSessionsApp(App):
         self._aliases.apply(projects)
         self._cache.prune(seen)
         self._cache.save()
-        elapsed = time.monotonic() - started
-        self.call_from_thread(self._apply_projects, projects, elapsed)
+        self.call_from_thread(self._apply_projects, projects)
 
-    def _apply_projects(self, projects: list[Project], elapsed: float) -> None:
+    def _apply_projects(self, projects: list[Project]) -> None:
         self.projects = projects
         self._refresh_projects_table()
         all_sessions = [s for p in self.projects for s in p.sessions]
@@ -855,7 +1043,6 @@ class PiSessionsApp(App):
             f"{proj_label} - {active} sessions"
             + (f" ({', '.join(extras)})" if extras else "")
             + f" - {live_count} active"
-            + f" - scan {elapsed:.1f}s"
         )
 
     def _muted_hex(self) -> str | None:
@@ -887,19 +1074,30 @@ class PiSessionsApp(App):
             "muted": self._muted_hex() or "bright_black",
         }
 
+    def _sorted(self, table_id: str, items: list) -> list:
+        sort = self._sort.get(table_id)
+        if sort is None:
+            return items
+        column, descending = sort
+        return sorted(items, key=SORTABLE[table_id][column][1], reverse=descending)
+
     def _visible_projects(self) -> list[Project]:
+        return self._sorted("projects-table", self._filtered_projects())
+
+    def _filtered_projects(self) -> list[Project]:
         q = self._project_filter.lower()
         if not q:
             return self.projects
         return [
             p
             for p in self.projects
-            if q in p.display_name.lower()
-            or q in p.project_path.lower()
-            or q in p.alias.lower()
+            if q in p.display_name.lower() or q in p.project_path.lower() or q in p.alias.lower()
         ]
 
     def _visible_sessions_of(self, project: Project) -> list[Session]:
+        return self._sorted("sessions-table", self._filtered_sessions_of(project))
+
+    def _filtered_sessions_of(self, project: Project) -> list[Session]:
         q = self._session_filter.lower()
         if not q:
             return project.sessions
@@ -931,7 +1129,7 @@ class PiSessionsApp(App):
             if 0 <= table.cursor_row < len(self._vprojects)
             else None
         )
-        prev_row, scroll_y = table.cursor_row, table.scroll_y
+        prev_row, scroll_x, scroll_y = table.cursor_row, table.scroll_x, table.scroll_y
         table.clear()
         self._vprojects = self._visible_projects()
         for p in self._vprojects:
@@ -945,16 +1143,18 @@ class PiSessionsApp(App):
             else:
                 live = Text(" ")
             name_style = f"{pal['muted']} italic" if all_archived else f"bold {pal['primary']}"
-            name = Text(p.display_name, style=name_style)
-            sess_label = (
-                f"{len(active)}"
-                if not archived
-                else f"{len(active)}+{len(archived)}"
+            name = Text.assemble(
+                live,
+                " ",
+                (p.display_name, name_style),
+                no_wrap=True,
+                overflow="ellipsis",
             )
+            sess_label = f"{len(active)}" if not archived else f"{len(active)}+{len(archived)}"
             count = Text(sess_label, style=pal["warning"], justify="right")
             tok_style = pal["muted"] if all_archived else pal["secondary"]
             tokens = Text(fmt_tokens(p.total_tokens), style=tok_style, justify="right")
-            table.add_row(live, name, count, tokens)
+            table.add_row(name, count, tokens)
         if table.row_count:
             row = 0
             if prev_dir is not None:
@@ -964,7 +1164,7 @@ class PiSessionsApp(App):
                         break
             table.move_cursor(row=row)
             if self._vprojects[row].encoded_dir == prev_dir:
-                self._keep_scroll(table, scroll_y, moved=row != prev_row)
+                self._keep_scroll(table, scroll_x, scroll_y, moved=row != prev_row)
             self._show_sessions_for(row)
         else:
             self._update_sessions_table([])
@@ -1009,7 +1209,7 @@ class PiSessionsApp(App):
             if 0 <= table.cursor_row < len(self._vsessions)
             else None
         )
-        prev_row, scroll_y = table.cursor_row, table.scroll_y
+        prev_row, scroll_x, scroll_y = table.cursor_row, table.scroll_x, table.scroll_y
         table.clear()
         self._vsessions = sessions
         for s in sessions:
@@ -1023,40 +1223,40 @@ class PiSessionsApp(App):
                 marker = Text(" ")
             inactive = s.is_archived
             desc_raw = s.display_title.replace("\n", " ").strip() or s.session_id
-            if len(desc_raw) > 80:
-                desc_raw = desc_raw[:77] + "..."
             if inactive:
                 desc_style = pal["muted"]
             elif s.is_live:
                 desc_style = f"bold {pal['text']}"
             else:
                 desc_style = pal["text"]
-            desc = Text(desc_raw, style=desc_style)
+            desc = Text(desc_raw, style=desc_style, no_wrap=True, overflow="ellipsis")
             count_style = pal["muted"] if inactive else pal["warning"]
             count = Text(str(s.message_count), style=count_style, justify="right")
             tok_style = pal["muted"] if inactive else pal["secondary"]
             tokens = Text(fmt_tokens(s.tokens), style=tok_style, justify="right")
             modified = Text(fmt_date(s.modified), style=pal["muted"])
-            table.add_row(marker, self._watch_eye(s, pal), desc, count, tokens, modified)
+            icons = Text.assemble(marker, self._watch_eye(s, pal))
+            cells = [icons, desc, count, tokens, modified]
+            table.add_row(*cells if self._show_modified else cells[:-1])
         if prev_sid is not None:
             for row, s in enumerate(sessions):
                 if s.session_id == prev_sid:
                     table.move_cursor(row=row)
-                    self._keep_scroll(table, scroll_y, moved=row != prev_row)
+                    self._keep_scroll(table, scroll_x, scroll_y, moved=row != prev_row)
                     break
 
-    def _keep_scroll(self, table: DataTable, scroll_y: float, moved: bool) -> None:
+    def _keep_scroll(self, table: DataTable, scroll_x: float, scroll_y: float, moved: bool) -> None:
         """clear() snaps a table back to the top: put the view back where the
         user left it, so a rebuild (auto-refresh) never scrolls the list."""
 
         def restore() -> None:
-            table.scroll_to(y=scroll_y, animate=False, immediate=True)
+            table.scroll_to(x=scroll_x, y=scroll_y, animate=False, immediate=True)
             if moved:  # the selection was re-sorted: bring it into view
                 table.move_cursor(row=table.cursor_row)
 
         # now, so no frame paints at the top, and again once Textual has run its
         # queued scroll-to-cursor
-        table.scroll_to(y=scroll_y, animate=False, immediate=True)
+        table.scroll_to(x=scroll_x, y=scroll_y, animate=False, immediate=True)
         table.call_after_refresh(restore)
 
     def _update_preview(self, session: Session | None, force: bool = False) -> None:
@@ -1073,17 +1273,17 @@ class PiSessionsApp(App):
             widget.update("[dim]No session selected[/dim]")
             return
 
-        # colors follow the active Textual theme instead of being hardcoded;
-        # plain names (red, cyan…) in Textual markup would be vivid web colors
+        # colors follow the active Textual theme instead of being hardcoded
         th = self.current_theme
-        c_success = th.success or "ansi_green"
-        c_warning = th.warning or "ansi_yellow"
-        c_error = th.error or "ansi_red"
-        c_primary = th.primary or "ansi_cyan"
-        c_secondary = th.secondary or "ansi_magenta"
-        c_accent = th.accent or "ansi_blue"
-        c_text = th.foreground or "ansi_default"
-        c_muted = self._muted_hex() or "ansi_bright_black"
+        # rendered as Rich markup, which spells ansi_green as green
+        c_success = rich_color(th.success, "green")
+        c_warning = rich_color(th.warning, "yellow")
+        c_error = rich_color(th.error, "red")
+        c_primary = rich_color(th.primary, "cyan")
+        c_secondary = rich_color(th.secondary, "magenta")
+        c_accent = rich_color(th.accent, "blue")
+        c_text = rich_color(th.foreground, "default")
+        c_muted = rich_color(self._muted_hex(), "bright_black")
 
         if session.is_archived:
             state = f"[{c_error}]▪ archived (a = restore)[/]"
@@ -1102,9 +1302,7 @@ class PiSessionsApp(App):
         )
 
         # title line only when the session actually has a summary
-        title_line = (
-            f"[bold {c_primary}]{escape(session.summary)}[/]\n" if session.summary else ""
-        )
+        title_line = f"[bold {c_primary}]{escape(session.summary)}[/]\n" if session.summary else ""
         first_prompt = session.first_prompt.strip()
         if not first_prompt:
             first_prompt = "(none)"
@@ -1122,11 +1320,11 @@ class PiSessionsApp(App):
                 if not cwd_exists
                 else ""
             )
-            resume_line = (
-                f"\n[bold]Resume command[/bold] [{c_muted}](c = copy to clipboard)[/]"
-                f"{warn}\n"
-                f"[{c_primary}]{escape(cmd)}[/]\n"
-            )
+            # hidden by default: the text can't be mouse-copied, `c` is the way
+            show = self._show_resume_command
+            shown = f"\n[{c_primary}]{escape(cmd)}[/]" if show else ""
+            hint = "(c = copy to clipboard)" if show else ": press c to copy to clipboard"
+            resume_line = f"\n[bold]Resume command[/bold] [{c_muted}]{hint}[/]{warn}{shown}\n"
 
         watch_state = self._watch_state(session)
         if watch_state:
@@ -1144,30 +1342,43 @@ class PiSessionsApp(App):
             watch_line = ""
 
         t = session.tokens
-        text = (
-            f"{title_line}"
-            f"{state}{model}{branches}\n{fork}\n"
-            f"[{c_muted}]ID:[/]  [{c_text}]{session.session_id}[/]\n"
-            f"[{c_muted}]CWD:[/] [{c_text}]{escape(short_path(session.project_path))}[/]"
-            f"{'' if cwd_exists else f' [{c_warning}](does not exist)[/]'}\n"
-            f"[{c_muted}]Created:[/]  [{c_text}]{fmt_date(session.created)}[/]\n"
-            f"[{c_muted}]Modified:[/] [{c_text}]{fmt_date(session.modified)}[/]\n"
-            f"[{c_muted}]Messages:[/] [{c_warning}]{session.message_count}[/]\n"
-            f"\n"
+        status = f"{state}{model}{branches}\n{fork}"
+        # labels apart from values, so a long CWD folds in its own column
+        meta = Table.grid(padding=(0, 1))
+        meta.add_column(no_wrap=True)
+        meta.add_column(ratio=1, overflow="fold")
+        missing = "" if cwd_exists else f" [{c_warning}](does not exist)[/]"
+        for label, value in (
+            ("ID:", f"[{c_text}]{session.session_id}[/]"),
+            ("CWD:", f"[{c_text}]{escape(short_path(session.project_path))}[/]{missing}"),
+            ("Created:", f"[{c_text}]{fmt_date(session.created)}[/]"),
+            ("Modified:", f"[{c_text}]{fmt_date(session.modified)}[/]"),
+            ("Messages:", f"[{c_warning}]{session.message_count}[/]"),
+        ):
+            meta.add_row(Text.from_markup(f"[{c_muted}]{label}[/]"), Text.from_markup(value))
+        tokens = (
             f"[bold]Tokens[/bold]\n"
-            f"  [{c_success}]input:[/]       [{c_text}]{t.input:>12,}[/]\n"
-            f"  [{c_secondary}]output:[/]      [{c_text}]{t.output:>12,}[/]\n"
-            f"  [{c_primary}]cache read:[/]  [{c_text}]{t.cache_read:>12,}[/]\n"
-            f"  [{c_accent}]cache write:[/] [{c_text}]{t.cache_write:>12,}[/]\n"
-            f"  [bold]Σ total:[/]     [bold {c_warning}]{t.total:>12,}[/]\n"
-            f"  [bold]$ cost:[/]      [bold {c_warning}]{t.cost:>12.4f}[/]\n"
+            f"[{c_success}]input:[/]       [{c_text}]{t.input:>12,}[/]\n"
+            f"[{c_secondary}]output:[/]      [{c_text}]{t.output:>12,}[/]\n"
+            f"[{c_primary}]cache read:[/]  [{c_text}]{t.cache_read:>12,}[/]\n"
+            f"[{c_accent}]cache write:[/] [{c_text}]{t.cache_write:>12,}[/]\n"
+            f"[bold]Σ total:[/]     [bold {c_warning}]{t.total:>12,}[/]\n"
+            f"[bold]$ cost:[/]      [bold {c_warning}]{t.cost:>12.4f}[/]"
+        )
+        footer = (
             f"{resume_line}"
             f"{watch_line}"
             f"\n"
             f"[bold]First prompt[/bold]\n"
             f"[{c_text}]{escape(first_prompt)}[/]"
         )
-        widget.update(text)
+        # state and settings left, tokens right
+        top = Table.grid(expand=True, padding=(0, 3))
+        top.add_column(ratio=1)
+        top.add_column(no_wrap=True)
+        top.add_row(Group(Text.from_markup(status), meta), Text.from_markup(tokens))
+        parts = [Text.from_markup(title_line.rstrip())] if title_line else []
+        widget.update(Group(*parts, top, Text.from_markup(footer)))
 
     def _update_conversation(self, session: Session | None) -> None:
         widget = self.query_one("#conversation-content", Static)
@@ -1238,6 +1449,37 @@ class PiSessionsApp(App):
             self.query_one("#status", Static).update(msg)
         except Exception:
             pass
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        """Click a numeric/date header: descending, then ascending, then unsorted."""
+        table = event.data_table
+        sortable = SORTABLE.get(table.id or "", {})
+        column = event.column_key.value
+        if column not in sortable:
+            return
+        current = self._sort.get(table.id)
+        if current is None or current[0] != column:
+            self._sort[table.id] = (column, True)
+        elif current[1]:
+            self._sort[table.id] = (column, False)
+        else:
+            del self._sort[table.id]
+        self._label_sort_arrows(table)
+        if table.id == "projects-table":
+            self._refresh_projects_table()
+        else:
+            self._show_sessions_for(self.query_one("#projects-table", DataTable).cursor_row)
+
+    def _label_sort_arrows(self, table: DataTable) -> None:
+        sort = self._sort.get(table.id or "")
+        for key, (label, _) in SORTABLE[table.id or ""].items():
+            if key not in table.columns:
+                continue  # hidden by a setting
+            arrow = "" if sort is None or sort[0] != key else (" ▼" if sort[1] else " ▲")
+            col = table.columns[key]
+            col.label = Text(label + arrow)
+            # a label only sizes its column when added: make room for the arrow
+            col.content_width = max(col.content_width, col.label.cell_len)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         # read the table's live cursor instead of the event payload: clear() and
@@ -1314,9 +1556,7 @@ class PiSessionsApp(App):
         self._filter_target = "projects" if self._focus_on_projects() else "sessions"
         inp = self.query_one("#filter-input", FilterInput)
         inp.value = (
-            self._project_filter
-            if self._filter_target == "projects"
-            else self._session_filter
+            self._project_filter if self._filter_target == "projects" else self._session_filter
         )
         inp.placeholder = f"Filter {self._filter_target}…  (Enter = apply, Esc = clear)"
         inp.display = True
@@ -1415,6 +1655,9 @@ class PiSessionsApp(App):
         self.push_screen(ExportScreen(s.display_title[:50]), on_export)
 
     def action_rename(self) -> None:
+        if not self._focus_on_projects():
+            self._rename_session()
+            return
         p = self._current_project()
         if p is None:
             return
@@ -1435,6 +1678,32 @@ class PiSessionsApp(App):
             self._set_status(msg)
 
         self.push_screen(RenameScreen(p.default_name, p.alias), on_rename)
+
+    def _rename_session(self) -> None:
+        s = self._selected_session()
+        if s is None:
+            return
+        if s.is_live:
+            # pi would chain its next entry past ours, leaving it on a dead branch
+            self._set_status("Session is live — rename it from pi with /name")
+            self.bell()
+            return
+
+        def on_rename(result: str | None) -> None:
+            if result is None:
+                return
+            name = result.strip()
+            try:
+                rename_session(s, name)
+            except ManageError as e:
+                self._set_status(f"Rename failed: {e}")
+                self.bell()
+                return
+            self._set_status(f"Session renamed: {name}" if name else "Session name cleared")
+            self.action_refresh()
+
+        default = s.first_prompt[:60] or s.session_id
+        self.push_screen(RenameScreen(default, s.summary, "Name"), on_rename)
 
     def _target_is_archived(self) -> bool:
         """Is the item `a` would act on (project or session) archived?"""
@@ -1506,9 +1775,7 @@ class PiSessionsApp(App):
             return
         p = self._current_project()
         if p is not None and p.is_archived:
-            self._set_status(
-                "Project is archived — restore the whole project (a on Projects pane)"
-            )
+            self._set_status("Project is archived — restore the whole project (a on Projects pane)")
             self.bell()
             return
         s = self._current_session()

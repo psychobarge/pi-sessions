@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+- **Settings** in the command palette (`ctrl+p`). First option, under
+  Display: hide the Modified column of the Sessions table so titles get more
+  room. Saved as `"show_modified"` in `~/.config/pi-sessions/settings.json`.
+  Under Details: show the resume command in full. Off by default: it can't be
+  copied with the mouse, so the pane shows `Resume command : press c to copy
+  to clipboard`. Saved as `"show_resume_command"`.
+- The header shows the installed version. On launch, a background check asks
+  PyPI for the latest release; when it is newer, the header shows it with the
+  upgrade command. Disable with `"check_updates": false` in
+  `~/.config/pi-sessions/settings.json`.
+- `pisessions --version` prints the installed version.
+- `n` on the Sessions pane names the session, the way pi's `/name` does: the
+  name is written into the session file, so pi shows it too. Empty input clears
+  it. Live sessions are refused: rename those from pi.
+- Click a numeric or date column header (Msgs, Tokens, Modified; Sessions,
+  Tokens on Projects) to sort: descending ▼, then ascending ▲, then back to
+  the default order. Hovering the header highlights only those clickable
+  labels, instead of the whole header row.
+
+### Fixed
+- Details colors (state, model, labels, token lines) with `ansi-*` themes:
+  they were dropped in exported screenshots since the pane moved to Rich
+  tables.
+- Long project names and session titles no longer push the other columns out
+  of a narrow pane: they are cut with `…` to fit the pane width and grow back
+  when it widens. The full name stays visible in Details.
+- Auto-refresh no longer resets the horizontal scroll of the Projects and
+  Sessions tables.
+- Titles and project names get more room: the status and watch icons share
+  one narrow column, the live dot sits next to the project name, and the
+  blank margin after the last column is gone (it was counted twice, plus a
+  scrollbar slot reserved even when no scrollbar showed).
+
 ## [0.2.0] — 2026-11-18
 
 ### Changed from ccsessions
@@ -11,6 +47,8 @@ All notable changes to this project are documented here.
   A saved Sessions height from an earlier drag is ignored.
 - Panes are resized by dragging their borders: the split bars between them
   are gone, so the panes touch. Double-click a border to reset it.
+- Details: token counts sit to the right of ID / CWD / dates instead of below
+  them. A long CWD wraps inside its column.
 
 ### Fixed
 - Dragging a pane border no longer selects the text of the panes it crosses.

@@ -46,7 +46,7 @@ class TokenStats:
     def total(self) -> int:
         return self.input + self.output + self.cache_read + self.cache_write
 
-    def __iadd__(self, other: "TokenStats") -> "TokenStats":
+    def __iadd__(self, other: TokenStats) -> TokenStats:
         self.input += other.input
         self.output += other.output
         self.cache_read += other.cache_read
