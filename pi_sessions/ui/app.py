@@ -457,12 +457,12 @@ class SettingsPanel(Vertical):
     def compose(self) -> ComposeResult:
         settings = load_settings()
         yield Static("✕", id="settings-close")
-        yield Static("Display", classes="section")
-        yield Tick(
-            "Show Modified column in Sessions",
-            settings.get("show_modified", True),
-            id="show_modified",
-        )
+        yield Static("Projects columns", classes="section")
+        for setting, (table_id, key) in COLUMN_SETTINGS.items():
+            if table_id == "sessions-table" and key == "msgs":
+                yield Static("Sessions columns", classes="section")
+            label = SORTABLE[table_id][key][0]
+            yield Tick(f"Show {label}", settings.get(setting, True), id=setting)
         yield Static("Details", classes="section")
         yield Tick(
             "Show resume command",
@@ -478,7 +478,7 @@ class SettingsPanel(Vertical):
         if event.checkbox.id == "show_resume_command":
             self.app.set_show_resume_command(event.value)  # type: ignore[attr-defined]
         else:
-            self.app.set_show_modified(event.value)  # type: ignore[attr-defined]
+            self.app.set_show_column(event.checkbox.id, event.value)  # type: ignore[attr-defined]
 
 
 class FilterInput(Input):
@@ -680,6 +680,15 @@ SORTABLE = {
     },
 }
 
+# settings key -> (table id, column key) of a column the user can hide
+COLUMN_SETTINGS = {
+    "show_project_sessions": ("projects-table", "sessions"),
+    "show_project_tokens": ("projects-table", "tokens"),
+    "show_msgs": ("sessions-table", "msgs"),
+    "show_tokens": ("sessions-table", "tokens"),
+    "show_modified": ("sessions-table", "modified"),
+}
+
 
 class SortTable(FitTable):
     """Hovering the header lights only a sortable (clickable) column label."""
@@ -860,7 +869,11 @@ class PiSessionsApp(App):
         # {"wide": {"group": {"width": 40.0}}, "narrow": {...}}
         self._layout = _load_layout(load_settings().get("layout"))
         self._mode = ""
-        self._show_modified = load_settings().get("show_modified", True)
+        self._hidden = {
+            col
+            for setting, col in COLUMN_SETTINGS.items()
+            if not load_settings().get(setting, True)
+        }
         self._show_resume_command = load_settings().get("show_resume_command", False)
 
     def compose(self) -> ComposeResult:
@@ -946,15 +959,16 @@ class PiSessionsApp(App):
         )
         yield SystemCommand("Settings", "Display preferences", self.action_show_settings)
 
-    def set_show_modified(self, show: bool) -> None:
-        self._show_modified = show
+    def set_show_column(self, setting: str, show: bool) -> None:
+        table_id, key = COLUMN_SETTINGS[setting]
+        (self._hidden.discard if show else self._hidden.add)((table_id, key))
         settings = load_settings()
-        settings["show_modified"] = show
+        settings[setting] = show
         save_settings(settings)
-        if self._sort.get("sessions-table", ("",))[0] == "modified":
-            del self._sort["sessions-table"]
-        self._build_session_columns()
-        self._show_sessions_for(self.query_one("#projects-table", DataTable).cursor_row)
+        if self._sort.get(table_id, ("",))[0] == key:
+            del self._sort[table_id]
+        self._build_columns(table_id)
+        self._refresh_projects_table()
 
     def set_show_resume_command(self, show: bool) -> None:
         self._show_resume_command = show
@@ -963,15 +977,22 @@ class PiSessionsApp(App):
         save_settings(settings)
         self._update_preview(self._current_session(), force=True)
 
-    def _build_session_columns(self) -> None:
-        stable = self.query_one("#sessions-table", DataTable)
-        stable.clear(columns=True)
-        stable.add_column("  ")  # status marker + watch eye share one cell
-        stable.add_column("Title", key="fit")
-        for key, (label, _) in SORTABLE["sessions-table"].items():
-            if key != "modified" or self._show_modified:
-                stable.add_column(label, key=key)
-        self._label_sort_arrows(stable)
+    def _shown(self, table_id: str) -> list[str]:
+        """Keys of the optional columns of a table the user has not hidden."""
+        return [k for k in SORTABLE[table_id] if (table_id, k) not in self._hidden]
+
+    def _build_columns(self, table_id: str) -> None:
+        table = self.query_one(f"#{table_id}", DataTable)
+        table.clear(columns=True)
+        if table_id == "sessions-table":
+            table.add_column("  ")  # status marker + watch eye share one cell
+            table.add_column("Title", key="fit")
+        else:
+            # live marker sits in the name cell: one space instead of two paddings
+            table.add_column("  Project", key="fit")
+        for key in self._shown(table_id):
+            table.add_column(SORTABLE[table_id][key][0], key=key)
+        self._label_sort_arrows(table)
 
     def on_mount(self) -> None:
         self.title = "Pi Sessions"
@@ -984,12 +1005,9 @@ class PiSessionsApp(App):
             self.theme = "ansi-dark"  # unknown theme name — fall back
         self._apply_markdown_styles()
         ptable = self.query_one("#projects-table", DataTable)
-        # live marker sits in the name cell: one space instead of two paddings
-        ptable.add_column("  Project", key="fit")
-        for key, (label, _) in SORTABLE["projects-table"].items():
-            ptable.add_column(label, key=key)
+        self._build_columns("projects-table")
         ptable.border_title = "Projects"
-        self._build_session_columns()
+        self._build_columns("sessions-table")
         stable = self.query_one("#sessions-table", DataTable)
         stable.border_title = "Sessions"
         self.query_one("#info-scroll").border_title = "Details"
@@ -1250,7 +1268,8 @@ class PiSessionsApp(App):
             count = Text(sess_label, style=pal["warning"], justify="right")
             tok_style = pal["muted"] if all_archived else pal["secondary"]
             tokens = Text(fmt_tokens(p.total_tokens), style=tok_style, justify="right")
-            table.add_row(name, count, tokens)
+            optional = {"sessions": count, "tokens": tokens}
+            table.add_row(name, *(optional[k] for k in self._shown("projects-table")))
         if table.row_count:
             row = 0
             if prev_dir is not None:
@@ -1332,8 +1351,9 @@ class PiSessionsApp(App):
             tokens = Text(fmt_tokens(s.tokens), style=tok_style, justify="right")
             modified = Text(fmt_date(s.modified), style=pal["muted"])
             icons = Text.assemble(marker, self._watch_eye(s, pal))
-            cells = [icons, desc, count, tokens, modified]
-            table.add_row(*cells if self._show_modified else cells[:-1])
+            optional = {"msgs": count, "tokens": tokens, "modified": modified}
+            shown = (optional[k] for k in self._shown("sessions-table"))
+            table.add_row(icons, desc, *shown)
         if prev_sid is not None:
             for row, s in enumerate(sessions):
                 if s.session_id == prev_sid:

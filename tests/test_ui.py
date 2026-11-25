@@ -591,6 +591,14 @@ async def _exercise_show_modified_setting(tmp_path) -> None:
             assert table.row_count and len(table.get_row_at(0)) == len(table.columns)
             assert "sessions-table" not in app._sort  # sort on a hidden column is dropped
             assert settings_mod.load_settings(settings_path)["show_modified"] is False
+            await pilot.click("#show_msgs")
+            await pilot.click("#show_project_tokens")
+            await pilot.pause()
+            assert "msgs" not in table.columns and "tokens" in table.columns
+            ptable = app.query_one("#projects-table")
+            assert "tokens" not in ptable.columns and "sessions" in ptable.columns
+            assert ptable.row_count and len(ptable.get_row_at(0)) == len(ptable.columns)
+            assert len(table.get_row_at(0)) == len(table.columns)
 
             def details() -> str:
                 console = Console(width=200, record=True, file=io.StringIO())
@@ -613,6 +621,7 @@ async def _exercise_show_modified_setting(tmp_path) -> None:
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert "modified" not in app.query_one("#sessions-table").columns
+            assert "tokens" not in app.query_one("#projects-table").columns
 
 
 def test_show_modified_setting(tmp_path):

@@ -6,8 +6,11 @@ All notable changes to this project are documented here.
 
 ### Added
 - **Settings** in the command palette (`ctrl+p`). First option, under
-  Display: hide the Modified column of the Sessions table so titles get more
-  room. Saved as `"show_modified"` in `~/.config/pi-sessions/settings.json`.
+  Columns: hide any column but the name, in Projects (Sessions, Tokens) and in
+  Sessions (Msgs, Tokens, Modified), so names get more room. All shown by
+  default. Saved as `"show_project_sessions"`, `"show_project_tokens"`,
+  `"show_msgs"`, `"show_tokens"` and `"show_modified"` in
+  `~/.config/pi-sessions/settings.json`.
   Under Details: show the resume command in full. Off by default: it can't be
   copied with the mouse, so the pane shows `Resume command : press c to copy
   to clipboard`. Saved as `"show_resume_command"`.
