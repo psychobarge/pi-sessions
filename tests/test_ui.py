@@ -720,3 +720,31 @@ async def _exercise_one_side_panel() -> None:
 
 def test_keys_and_settings_panels_are_exclusive():
     asyncio.run(_exercise_one_side_panel())
+
+
+async def _exercise_foxberry_theme() -> None:
+    with patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()):
+        app = PiSessionsApp()
+        async with app.run_test(size=(160, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            app.theme = "foxberry"
+            await pilot.pause()
+            assert app.current_theme.accent == "#A35E75"
+            assert not app.current_theme.dark
+
+
+def test_foxberry_theme(tmp_path, monkeypatch):
+    monkeypatch.setattr(appmod, "save_settings", lambda _s: None)
+    asyncio.run(_exercise_foxberry_theme())
+
+
+def test_foxberry_code_theme():
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    theme = appmod.code_theme_for("foxberry", dark=False)
+    console = Console(record=True, color_system="truecolor", width=40)
+    console.print(Markdown("```python\ndef f(): pass\n```", code_theme=theme))
+    out = console.export_text(styles=True)
+    assert "48;2;239;242;246" in out  # #EFF2F6 background
+    assert "38;2;83;116;179" in out  # nord9 keyword
