@@ -2,12 +2,13 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [1.0.0] — 2026-11-26
 
 ### Added
 - `pisessions --select --output FILE` keeps the full browser available and returns
   the chosen session's JSONL path to the caller instead of launching Pi.
-- **Settings** in the command palette (`ctrl+p`). First option, under
+- **Settings** in the command palette (`p`), in a side panel docked right like
+  the keys panel (only one of them is open at a time). First option, under
   Columns: hide any column but the name, in Projects (Sessions, Tokens) and in
   Sessions (Msgs, Tokens, Modified), so names get more room. All shown by
   default. Saved as `"show_project_sessions"`, `"show_project_tokens"`,
@@ -34,6 +35,12 @@ All notable changes to this project are documented here.
   the app, so the preview stays visible around it.
 - `foxberry` light theme, with matching code block colors. Palette by
   [miskiewiczm](https://github.com/miskiewiczm/foxberry) (MIT).
+- The keys panel and the settings panel have a close button and close with
+  Escape.
+
+### Changed
+- "Fork of" in Details shows the parent session's title instead of its file
+  name (the file name stays when the parent can't be found).
 
 ### Fixed
 - Details colors (state, model, labels, token lines) with `ansi-*` themes:
