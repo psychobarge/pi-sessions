@@ -93,7 +93,9 @@ def write_transcript(
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Theme/layout changes in tests must never touch the real ~/.config settings."""
-    monkeypatch.setattr("pi_sessions.core.settings.DEFAULT_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(
+        "pi_sessions.core.settings.DEFAULT_SETTINGS_PATH", tmp_path / "settings.json"
+    )
 
 
 @pytest.fixture
@@ -104,3 +106,9 @@ def fake_base(tmp_path: Path) -> Path:
     proj.mkdir(parents=True)
     write_transcript(session_file(proj))
     return base
+
+
+@pytest.fixture(autouse=True)
+def no_pypi(monkeypatch):
+    """UI tests never reach PyPI; a test opts in by patching it again."""
+    monkeypatch.setattr("pi_sessions.ui.app.latest_version", lambda: None)

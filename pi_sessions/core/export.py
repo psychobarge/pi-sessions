@@ -186,7 +186,7 @@ def front_matter(session: Session, extra: dict[str, object] | None = None) -> st
     return "\n".join(lines)
 
 
-def heading_stamp(local: "datetime | None") -> str:
+def heading_stamp(local: datetime | None) -> str:
     """Clock suffix for a speaker heading; empty when the entry has no time.
 
     Only the time — the date is carried by the `##` day section above.

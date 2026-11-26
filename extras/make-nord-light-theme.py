@@ -38,7 +38,10 @@ def find_source() -> pathlib.Path:
             return pathlib.Path(path)
     quarto = shutil.which("quarto")
     if quarto:  # follow the launcher back to its share/ tree
-        guess = pathlib.Path(quarto).resolve().parent.parent / "share/pandoc/highlight-styles/nord.theme"
+        guess = (
+            pathlib.Path(quarto).resolve().parent.parent
+            / "share/pandoc/highlight-styles/nord.theme"
+        )
         if guess.is_file():
             return guess
     sys.exit("nord.theme not found — is Quarto installed?")
@@ -48,10 +51,10 @@ def darken(color: object, floor: float = 0.42) -> object:
     """Keep the hue, cap the lightness, nudge saturation to compensate."""
     if not (isinstance(color, str) and color.startswith("#") and len(color) == 7):
         return color
-    r, g, b = (int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    r, g, b = (int(color[i : i + 2], 16) / 255 for i in (1, 3, 5))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     r, g, b = colorsys.hls_to_rgb(h, min(l, floor), min(1.0, s * 1.15))
-    return "#%02x%02x%02x" % tuple(round(c * 255) for c in (r, g, b))
+    return "#" + "".join(f"{round(c * 255):02x}" for c in (r, g, b))
 
 
 def main() -> None:

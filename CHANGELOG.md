@@ -2,6 +2,60 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.0] — 2026-11-26
+
+### Added
+- `pisessions --select --output FILE` keeps the full browser available and returns
+  the chosen session's JSONL path to the caller instead of launching Pi.
+- **Settings** in the command palette (`p`), in a side panel docked right like
+  the keys panel (only one of them is open at a time). First option, under
+  Columns: hide any column but the name, in Projects (Sessions, Tokens) and in
+  Sessions (Msgs, Tokens, Modified), so names get more room. All shown by
+  default. Saved as `"show_project_sessions"`, `"show_project_tokens"`,
+  `"show_msgs"`, `"show_tokens"` and `"show_modified"` in
+  `~/.config/pi-sessions/settings.json`.
+  Under Details: show the resume command in full. Off by default: it can't be
+  copied with the mouse, so the pane shows `Resume command : press c to copy
+  to clipboard`. Saved as `"show_resume_command"`.
+- The header shows the installed version. On launch, a background check asks
+  PyPI for the latest release; when it is newer, the header shows it with the
+  upgrade command. Disable with `"check_updates": false` in
+  `~/.config/pi-sessions/settings.json`.
+- `pisessions --version` prints the installed version.
+- `n` on the Sessions pane names the session, the way pi's `/name` does: the
+  name is written into the session file, so pi shows it too. Empty input clears
+  it. Live sessions are refused: rename those from pi.
+- Click a numeric or date column header (Msgs, Tokens, Modified; Sessions,
+  Tokens on Projects) to sort: descending ▼, then ascending ▲, then back to
+  the default order. Hovering the header highlights only those clickable
+  labels, instead of the whole header row.
+- Reworked the theme picker (Change theme in the palette): each theme is
+  previewed live as you move through the list (↑/↓ or typing); Enter keeps it,
+  Esc restores the previous theme. The picker is narrower and no longer dims
+  the app, so the preview stays visible around it.
+- `foxberry` light theme, with matching code block colors. Palette by
+  [miskiewiczm](https://github.com/miskiewiczm/foxberry) (MIT).
+- The keys panel and the settings panel have a close button and close with
+  Escape.
+
+### Changed
+- "Fork of" in Details shows the parent session's title instead of its file
+  name (the file name stays when the parent can't be found).
+
+### Fixed
+- Details colors (state, model, labels, token lines) with `ansi-*` themes:
+  they were dropped in exported screenshots since the pane moved to Rich
+  tables.
+- Long project names and session titles no longer push the other columns out
+  of a narrow pane: they are cut with `…` to fit the pane width and grow back
+  when it widens. The full name stays visible in Details.
+- Auto-refresh no longer resets the horizontal scroll of the Projects and
+  Sessions tables.
+- Titles and project names get more room: the status and watch icons share
+  one narrow column, the live dot sits next to the project name, and the
+  blank margin after the last column is gone (it was counted twice, plus a
+  scrollbar slot reserved even when no scrollbar showed).
+
 ## [0.2.0] — 2026-11-18
 
 ### Changed from ccsessions
@@ -11,6 +65,8 @@ All notable changes to this project are documented here.
   A saved Sessions height from an earlier drag is ignored.
 - Panes are resized by dragging their borders: the split bars between them
   are gone, so the panes touch. Double-click a border to reset it.
+- Details: token counts sit to the right of ID / CWD / dates instead of below
+  them. A long CWD wraps inside its column.
 
 ### Fixed
 - Dragging a pane border no longer selects the text of the panes it crosses.

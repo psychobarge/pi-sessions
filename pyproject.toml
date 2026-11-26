@@ -1,6 +1,6 @@
 [project]
 name = "pi-sessions-tui"
-version = "0.2.0"
+version = "1.0.0"
 description = "Terminal UI for browsing, previewing, resuming and managing pi coding agent sessions"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ authors = [
 ]
 keywords = ["pi", "pi-coding-agent", "sessions", "tui", "textual", "terminal"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -39,6 +39,7 @@ pisessions = "pi_sessions.__main__:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "ruff>=0.17.5",
 ]
 
 [tool.pytest.ini_options]
@@ -54,3 +55,15 @@ packages = ["pi_sessions"]
 [tool.hatch.build.targets.sdist]
 # optional Quarto themes — repo only, never shipped in a package
 exclude = ["/extras"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# long strings, deliberate lambdas, `l` for lightness in HLS maths
+ignore = ["E501", "E731", "E741"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
