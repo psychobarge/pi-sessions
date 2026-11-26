@@ -29,6 +29,8 @@ All notable changes to this project are documented here.
   previewed live as you move through the list (↑/↓ or typing); Enter keeps it,
   Esc restores the previous theme. The picker is narrower and no longer dims
   the app, so the preview stays visible around it.
+- `foxberry` light theme, with matching code block colors. Palette by
+  [miskiewiczm](https://github.com/miskiewiczm/foxberry) (MIT).
 
 ### Fixed
 - Details colors (state, model, labels, token lines) with `ansi-*` themes:

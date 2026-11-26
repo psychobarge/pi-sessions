@@ -119,6 +119,9 @@ stops updating when the picker exits and leaves its Markdown file in place.
 Settings and project aliases live in `~/.config/pi-sessions/`, the cache in
 `~/.cache/pi-sessions/`.
 
+The `foxberry` light theme is by
+[miskiewiczm](https://github.com/miskiewiczm/foxberry) (MIT).
+
 ### pi in a container
 
 If pi runs in Docker with its agent directory in a named volume, the host

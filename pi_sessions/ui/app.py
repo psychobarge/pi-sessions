@@ -6,10 +6,13 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
+from pygments.style import Style as PygmentsStyle
+from pygments.token import Comment, Error, Generic, Keyword, Name, Number, Operator, String, Token
 from rich.console import Group
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.padding import Padding
+from rich.syntax import PygmentsSyntaxTheme, SyntaxTheme
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme as RichTheme
@@ -24,7 +27,7 @@ from textual.errors import NoWidget
 from textual.geometry import Region, Size
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
-from textual.theme import ThemeProvider
+from textual.theme import Theme, ThemeProvider
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, DataTable, Footer, Header, HelpPanel, Input, Static
 from textual.widgets._footer import FooterKey
@@ -128,7 +131,7 @@ def _auto_refresh_seconds() -> float:
 
 
 # app theme -> closest built-in pygments style for fenced code blocks
-PYGMENTS_FOR_THEME = {
+PYGMENTS_FOR_THEME: dict[str, str | SyntaxTheme] = {
     "nord": "nord",
     "gruvbox": "gruvbox-dark",
     "dracula": "dracula",
@@ -143,7 +146,53 @@ PYGMENTS_FOR_THEME = {
 }
 
 
-def code_theme_for(theme_name: str, dark: bool, override: str = "") -> str:
+# Foxberry: light Nord (MIT) — https://github.com/miskiewiczm/foxberry
+FOXBERRY_THEME = Theme(
+    name="foxberry",
+    primary="#287F92",  # nord8 text
+    secondary="#5374B3",  # nord9 text
+    accent="#A35E75",  # foxberry
+    foreground="#3B4252",
+    background="#E5E9F0",
+    surface="#EFF2F6",
+    panel="#D8DEE9",
+    success="#4E8044",
+    warning="#967044",
+    error="#BE525A",
+    dark=False,
+)
+
+
+class FoxberryStyle(PygmentsStyle):
+    """Code blocks for foxberry, from the palette's syntax roles."""
+
+    background_color = "#EFF2F6"
+    styles = {
+        Token: "#3B4252",
+        Comment: "italic #6A7488",
+        Keyword: "#5374B3",  # nord9
+        Operator: "#5374B3",
+        Name.Builtin: "#287F92",
+        Name.Function: "#287F92",  # nord8
+        Name.Class: "#36816F",  # nord7
+        Keyword.Type: "#36816F",
+        Name.Decorator: "#B15E37",  # nord12
+        Name.Tag: "#5374B3",
+        Name.Attribute: "#36816F",
+        Name.Constant: "#986393",  # nord15
+        String: "#4E8044",  # nord14
+        Number: "#986393",
+        Error: "#BE525A",  # nord11
+        Generic.Inserted: "#4E8044",
+        Generic.Deleted: "#BE525A",
+        Generic.Heading: "bold #2E3440",
+    }
+
+
+PYGMENTS_FOR_THEME["foxberry"] = PygmentsSyntaxTheme(FoxberryStyle)
+
+
+def code_theme_for(theme_name: str, dark: bool, override: str = "") -> str | SyntaxTheme:
     """Pick a pygments style: explicit override wins, then a per-theme match,
     then a dark/light fallback."""
     if override:
@@ -981,6 +1030,7 @@ class PiSessionsApp(App):
     def on_mount(self) -> None:
         self.title = "Pi Sessions"
         self.sub_title = f"v{__version__}"  # replaced if a newer release exists
+        self.register_theme(FOXBERRY_THEME)
         # precedence: env var > theme saved from a previous run > default
         requested = APP_THEME_OVERRIDE or load_settings().get("theme") or "ansi-dark"
         try:
@@ -1533,7 +1583,10 @@ class PiSessionsApp(App):
                 parts.append(
                     Text.assemble(("▌ Pi", f"bold {pal['success']}"), (stamp, pal["success"]))
                 )
-                parts.append(Padding(Markdown(text, code_theme=code_theme), (0, 0, 1, 2)))
+                # Rich annotates code_theme as str but passes it to Syntax.get_theme,
+                # which takes a SyntaxTheme too
+                md = Markdown(text, code_theme=code_theme)  # pyright: ignore[reportArgumentType]
+                parts.append(Padding(md, (0, 0, 1, 2)))
         widget.update(Group(*parts))
         # show the end of the conversation — that's where the freshest context is
         self.call_after_refresh(scroll.scroll_end, animate=False)
