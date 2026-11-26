@@ -109,7 +109,9 @@ def test_session_selection_keys(select_mode, keys, session_id):
                     "Select" if select_mode else "Resume"
                 )
                 await pilot.press(*keys)
-        assert app.return_value == ResumeRequest(session_id, "/tmp/x", f"/nonexistent/{session_id}.jsonl")
+        assert app.return_value == ResumeRequest(
+            session_id, "/tmp/x", f"/nonexistent/{session_id}.jsonl"
+        )
 
     asyncio.run(exercise())
 

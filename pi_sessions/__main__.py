@@ -13,7 +13,9 @@ from .ui.app import PiSessionsApp
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pisessions")
     parser.add_argument("-V", "--version", action="version", version=f"pisessions {__version__}")
-    parser.add_argument("--select", action="store_true", help="select a session without launching Pi")
+    parser.add_argument(
+        "--select", action="store_true", help="select a session without launching Pi"
+    )
     parser.add_argument(
         "--output", type=Path, metavar="FILE", help="new file for the selected path (JSON string)"
     )
