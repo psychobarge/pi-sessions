@@ -1466,11 +1466,18 @@ class PiSessionsApp(App):
         branches = (
             f"  [{c_warning}]⑂ {session.branches} branches[/]" if session.branches > 1 else ""
         )
-        fork = (
-            f"[{c_muted}]⑂ fork of {escape(Path(session.parent_session).name)}[/]\n"
-            if session.parent_session
-            else ""
-        )
+        fork = ""
+        if session.parent_session:
+            # match on file name: archiving moves the parent into archived/
+            pname = Path(session.parent_session).name
+            parent = next(
+                (s for p in self.projects for s in p.sessions if s.jsonl_path.name == pname),
+                None,
+            )
+            label = parent.display_title.replace("\n", " ").strip() if parent else pname
+            if len(label) > 80:  # a first prompt can be pages long
+                label = label[:77] + "..."
+            fork = f"[{c_muted}]⑂ fork of {escape(label)}[/]\n"
 
         # title line only when the session actually has a summary
         title_line = f"[bold {c_primary}]{escape(session.summary)}[/]\n" if session.summary else ""
