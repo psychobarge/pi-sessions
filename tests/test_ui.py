@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from rich.console import Console
 from textual.command import CommandList
 from textual.widgets import Static
@@ -12,6 +14,7 @@ from textual.widgets import Static
 import pi_sessions.ui.app as appmod
 from pi_sessions.core import settings as settings_mod
 from pi_sessions.core.models import Project, Session
+from pi_sessions.core.resume import ResumeRequest
 from pi_sessions.ui.app import PiSessionsApp
 
 
@@ -37,8 +40,8 @@ def _fake_projects() -> list[Project]:
     return [alpha, beta]
 
 
-async def _exercise_filters() -> None:
-    app = PiSessionsApp()
+async def _exercise_filters(select_mode: bool) -> None:
+    app = PiSessionsApp(select_mode=select_mode)
     with patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()):
         async with app.run_test(size=(120, 40)) as pilot:
             await app.workers.wait_for_complete()
@@ -87,8 +90,106 @@ async def _exercise_filters() -> None:
             assert st.row_count == 2
 
 
-def test_filter_projects_and_sessions():
-    asyncio.run(_exercise_filters())
+@pytest.mark.parametrize("select_mode", [False, True])
+def test_filter_projects_and_sessions(select_mode):
+    asyncio.run(_exercise_filters(select_mode))
+
+
+@pytest.mark.parametrize(
+    ("select_mode", "keys", "session_id"),
+    [(False, ("tab", "j", "r"), "s2"), (True, ("tab", "j", "r"), "s2"), (True, ("enter",), "s1")],
+)
+def test_session_selection_keys(select_mode, keys, session_id):
+    async def exercise():
+        app = PiSessionsApp(select_mode=select_mode)
+        with patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await app.workers.wait_for_complete()
+                assert app.screen.active_bindings["r"].binding.description == (
+                    "Select" if select_mode else "Resume"
+                )
+                await pilot.press(*keys)
+        assert app.return_value == ResumeRequest(session_id, "/tmp/x", f"/nonexistent/{session_id}.jsonl")
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("open_panel", "selector"),
+    [("action_show_help_panel", "HelpPanel"), ("action_show_settings", "SettingsPanel")],
+)
+def test_picker_preserves_side_panel_keys_before_cancelling(open_panel, selector):
+    async def exercise():
+        app = PiSessionsApp(select_mode=True)
+        with patch.object(appmod, "discover_projects", lambda **_kw: _fake_projects()):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await app.workers.wait_for_complete()
+                getattr(app, open_panel)()
+                await pilot.pause()
+                assert app.screen.query(selector)
+
+                if selector == "SettingsPanel":
+                    checkbox = app.query_one("#show_modified", appmod.Tick)
+                    previous = checkbox.value
+                    checkbox.focus()
+                    await pilot.press("enter")
+                    assert checkbox.value is not previous
+                    assert app.return_code is None
+
+                await pilot.press("escape")
+                await pilot.pause()
+                assert not app.screen.query(selector)
+                assert app.return_code is None
+
+                await pilot.press("escape")
+                assert app.return_code == 0
+        assert app.return_value is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_picker_keeps_management_and_requires_restore_before_selection(fake_base, restore):
+    transcript = next(fake_base.glob("*/*.jsonl"))
+    os.utime(transcript, (0, 0))  # Use the normal archive guard for an inactive session.
+    archived = transcript.parent / "archived" / transcript.name
+    discover = appmod.discover_projects
+
+    async def exercise():
+        app = PiSessionsApp(select_mode=True)
+        with patch.object(appmod, "discover_projects", lambda **kw: discover(base=fake_base, **kw)):
+            async with app.run_test(size=(120, 40)) as pilot:
+                await app.workers.wait_for_complete()
+                await pilot.press("tab")
+                assert {"a", "d", "n", "e", "l", "c"} <= app.screen.active_bindings.keys()
+                await pilot.press("d")
+                assert len(app.screen_stack) == 2
+                await pilot.press("enter")  # Delete dialog defaults to No, not picker Select.
+                assert len(app.screen_stack) == 1 and transcript.is_file()
+
+                await pilot.press("a")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                assert archived.is_file() and not transcript.exists()
+                await pilot.press("enter")
+                assert app.return_code is None
+                assert "restore it first" in str(app.query_one("#status", Static).render())
+                if restore:
+                    await pilot.press("a")
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+                    assert transcript.is_file() and not archived.exists()
+                    await pilot.press("enter")
+                else:
+                    await pilot.press("escape")
+
+        if restore:
+            assert isinstance(app.return_value, ResumeRequest)
+            assert app.return_value.file == str(transcript)
+        else:
+            assert app.return_value is None and archived.is_file()
+
+    asyncio.run(exercise())
 
 
 async def _exercise_export(tmp_path: Path) -> None:

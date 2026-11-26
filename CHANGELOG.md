@@ -5,6 +5,8 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Added
+- `pisessions --select --output FILE` keeps the full browser available and returns
+  the chosen session's JSONL path to the caller instead of launching Pi.
 - **Settings** in the command palette (`ctrl+p`). First option, under
   Display: hide the Modified column of the Sessions table so titles get more
   room. Saved as `"show_modified"` in `~/.config/pi-sessions/settings.json`.

@@ -81,6 +81,26 @@ On a narrow terminal (half a screen) the panes stack instead:
 
 ![pi-sessions in a narrow terminal](docs/screenshot-narrow.svg)
 
+### Use as a picker
+
+A terminal application can open the same browser and handle the session itself:
+
+```bash
+pisessions --select --output /path/to/new-selection.json
+```
+
+Press **Enter** or `r` to select an unarchived session without launching Pi.
+The output file must not already exist. On selection it contains the absolute
+JSONL path as a JSON string on one line (local to this machine, without
+`PI_SESSIONS_RESUME_ROOT` remapping). Press **Escape** or `q` to cancel without
+creating the file. Escape first closes an open side panel or clears an active
+filter.
+
+Management actions stay available, and cancelling does not undo them. Close
+any affected Pi sessions before archiving, deleting, or renaming: the browser
+checks file recency, so an idle but open session can appear inactive. A Live Doc
+stops updating when the picker exits and leaves its Markdown file in place.
+
 ## Settings
 
 | Variable | Default | Purpose |

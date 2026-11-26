@@ -824,7 +824,11 @@ class PiSessionsApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("escape", "hide_help_panel", "Close side panel", show=False),
+        Binding("escape", "cancel_picker", "Cancel"),
         Binding("r", "resume", "Resume"),
+        Binding("r", "select_session", "Select", show=False),
+        # Override DataTable's Enter binding without changing mouse clicks.
+        Binding("enter", "select_session", "Select", priority=True),
         Binding("c", "copy_resume", "Copy command"),
         Binding("a", "archive", "Archive"),
         Binding("a", "restore", "Restore"),
@@ -840,8 +844,9 @@ class PiSessionsApp(App):
         Binding("k", "cursor_up", "Up", show=False),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, *, select_mode: bool = False) -> None:
         super().__init__()
+        self._select_mode = select_mode
         self.projects: list[Project] = []
         self._cache = TokenCache()
         self._aliases = ProjectAliases()
@@ -1636,6 +1641,12 @@ class PiSessionsApp(App):
         if s is not None:
             self.exit(_resume_request(s))
 
+    def action_select_session(self) -> None:
+        self.action_resume()
+
+    def action_cancel_picker(self) -> None:
+        self.exit()
+
     def action_copy_resume(self) -> None:
         s = self._selected_session()
         if s is None:
@@ -1813,6 +1824,17 @@ class PiSessionsApp(App):
         return s is not None and s.is_archived
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "hide_help_panel":
+            return bool(self.screen.query("HelpPanel, SettingsPanel"))
+        if action in {"select_session", "cancel_picker"}:
+            return (
+                self._select_mode
+                and len(self.screen_stack) == 1
+                and not isinstance(self.focused, Input)
+                and not self.screen.query("HelpPanel, SettingsPanel")
+            )
+        if action == "resume":
+            return not self._select_mode
         # `a` is bound twice; exactly one of archive/restore is active,
         # so the footer label follows the selected item
         if action == "archive":
